@@ -1,0 +1,34 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { Search, Upload, ArrowRight, FileText, Image as ImageIcon, FileSpreadsheet, ScanText, Wrench, Video, Music, Sparkles, Sun, Moon } from 'lucide-vue-next'
+
+const dark = ref(false)
+const query = ref('')
+const dragging = ref(false)
+const categories = [
+  { name: 'PDF 工具', icon: FileText, color: 'violet', desc: '合并、拆分、压缩、转换与加密' },
+  { name: '图片工具', icon: ImageIcon, color: 'blue', desc: '压缩、转换、裁剪与批量处理' },
+  { name: 'Office', icon: FileSpreadsheet, color: 'green', desc: 'Word、Excel、PPT 格式转换' },
+  { name: 'OCR 识别', icon: ScanText, color: 'orange', desc: '图片与 PDF 文字智能提取' },
+  { name: '实用工具', icon: Wrench, color: 'slate', desc: '文本、JSON、二维码等小工具' },
+  { name: '视频工具', icon: Video, color: 'red', desc: '压缩、转换、剪辑与 GIF' },
+  { name: '音频工具', icon: Music, color: 'pink', desc: '格式转换、剪辑与提取音频' },
+  { name: 'AI 办公', icon: Sparkles, color: 'indigo', desc: '总结、润色、翻译与智能助手' },
+]
+const filtered = computed(() => categories.filter(x => !query.value || `${x.name}${x.desc}`.toLowerCase().includes(query.value.toLowerCase())))
+function onDrop(e: DragEvent) { dragging.value = false; if (e.dataTransfer?.files.length) alert(`已选择 ${e.dataTransfer.files.length} 个文件，任务中心即将接入。`) }
+</script>
+
+<template>
+  <div class="app" :class="{ dark }">
+    <header><div class="brand"><div class="logo">O</div><div><strong>OfficeBox</strong><span>办公百宝箱</span></div></div><div class="header-actions"><button class="icon-btn" @click="dark=!dark" :title="dark?'浅色模式':'深色模式'"><Moon v-if="!dark" :size="19"/><Sun v-else :size="19"/></button><button class="github">GitHub ↗</button></div></header>
+    <main>
+      <section class="hero"><div class="eyebrow">ALL-IN-ONE OFFICE TOOLBOX</div><h1>工作中遇到的文件问题<br/><em>一个工具箱全部搞定。</em></h1><p>PDF、图片、Office、OCR、视频、音频和 AI 工具，开源、免费、可私有化部署。</p>
+        <div class="search"><Search :size="21"/><input v-model="query" placeholder="搜索工具，例如：PDF 合并、图片压缩、OCR…"/><kbd>⌘ K</kbd></div>
+      </section>
+      <section class="drop" :class="{ dragging }" @dragover.prevent="dragging=true" @dragleave="dragging=false" @drop.prevent="onDrop"><div class="upload-icon"><Upload :size="25"/></div><div><b>拖拽文件到这里</b><span>支持批量文件 · 选择后即可处理</span></div><button>选择文件</button></section>
+      <section class="section"><div class="section-title"><div><h2>工具箱</h2><p>覆盖日常办公最常见的文件处理需求</p></div><span>{{ filtered.length }} 个分类</span></div><div class="grid"><article v-for="item in filtered" :key="item.name" class="card"><div class="card-icon" :class="item.color"><component :is="item.icon" :size="23"/></div><div class="card-body"><h3>{{ item.name }}</h3><p>{{ item.desc }}</p></div><ArrowRight class="arrow" :size="18"/></article></div></section>
+      <section class="features"><div><strong>🔒 本地优先</strong><span>文件可以完全留在你的服务器</span></div><div><strong>⚡ 批量处理</strong><span>一次处理几十甚至上百个文件</span></div><div><strong>🧩 插件化</strong><span>按需扩展工具能力</span></div><div><strong>🐳 Docker</strong><span>一条命令快速部署</span></div></section>
+    </main><footer><span>OfficeBox · 开源办公工具箱</span><span>Made for productive work.</span></footer>
+  </div>
+</template>
