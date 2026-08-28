@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { Upload, Download, FileText, Loader2, Trash2, Archive } from 'lucide-vue-next'
-
 const files = ref<File[]>([])
 const busy = ref(false)
 const error = ref('')
@@ -33,7 +32,6 @@ async function convert() {
 }
 onBeforeUnmount(revoke)
 </script>
-
 <template>
   <div class="office">
     <div class="head"><div class="icon"><FileText :size="23"/></div><div><h1>Office 转 PDF</h1><p>Word、Excel、PowerPoint 一键转换，多个文件自动打包 ZIP。</p></div></div>
@@ -41,10 +39,9 @@ onBeforeUnmount(revoke)
     <div v-if="files.length" class="summary"><strong>{{ files.length }} 个文件</strong><span>总大小 {{ sizeText(totalSize) }}</span><button @click="clear"><Trash2 :size="14"/>清空</button></div>
     <div v-if="files.length" class="list"><div v-for="(f,i) in files" :key="f.name+i" class="file"><div class="badge">{{ kind(f).slice(0,1) }}</div><div class="meta"><b>{{ f.name }}</b><span>{{ kind(f) }} · {{ sizeText(f.size) }}</span></div><button @click="remove(i)">×</button></div></div>
     <div v-if="error" class="error">{{ error }}</div>
-    <div class="actions"><button class="primary" :disabled="busy || !files.length" @click="convert"><Loader2 v-if="busy" class="spin"/><Archive v-else :size="16"/><span>{{ busy ? '转换中…' : files.length > 1 ? '批量转换并下载 ZIP' : '转换为 PDF' }}</span></button><a v-if="resultUrl" class="download" :href="resultUrl" :download="resultName"><Download :size="16"/>{{ files.length > 1 ? '下载 ZIP' : '下载 PDF' }}</a></a></div>
+    <div class="actions"><button class="primary" :disabled="busy || !files.length" @click="convert"><Loader2 v-if="busy" class="spin"/><Archive v-else :size="16"/><span>{{ busy ? '转换中…' : files.length > 1 ? '批量转换并下载 ZIP' : '转换为 PDF' }}</span></button><a v-if="resultUrl" class="download" :href="resultUrl" :download="resultName"><Download :size="16"/>{{ files.length > 1 ? '下载 ZIP' : '下载 PDF' }}</a></div>
   </div>
 </template>
-
 <style scoped>
 .office{max-width:900px;margin:auto;padding:30px 24px}.head{display:flex;gap:14px;align-items:center;margin-bottom:22px}.icon{width:46px;height:46px;border-radius:12px;background:#eeeaff;color:#6659df;display:grid;place-items:center}.head h1{font-size:22px;margin:0 0 4px}.head p{font-size:12px;color:#8991a2;margin:0}.drop{min-height:190px;border:1.5px dashed #ccd1df;border-radius:15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:#6659df;background:#fbfdff;cursor:pointer}.drop b{font-size:13px;color:#343c4c}.drop span{font-size:11px;color:#969dad}.summary{display:flex;align-items:center;gap:12px;margin:16px 0 10px;font-size:12px}.summary span{color:#8991a2;flex:1}.summary button,.file button{border:0;background:transparent;cursor:pointer;color:#858da0;display:flex;gap:5px;align-items:center}.list{display:flex;flex-direction:column;gap:8px}.file{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e7e9ef;border-radius:9px}.badge{width:36px;height:36px;border-radius:8px;background:#f0efff;color:#6659df;display:grid;place-items:center;font-weight:700;font-size:12px}.meta{display:flex;flex-direction:column;min-width:0;flex:1}.meta b{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meta span{font-size:10px;color:#9aa1af;margin-top:3px}.error{margin-top:14px;background:#fff0f0;color:#c84f5a;padding:10px;border-radius:8px;font-size:12px}.actions{display:flex;gap:9px;margin-top:20px}.primary,.download{border:0;border-radius:9px;padding:10px 15px;display:flex;align-items:center;gap:7px;font-size:12px;font-weight:650;text-decoration:none;cursor:pointer}.primary{background:#6659df;color:white}.primary:disabled{opacity:.55;cursor:not-allowed}.download{background:#eaf7ef;color:#348354}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 </style>
