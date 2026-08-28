@@ -1,5 +1,6 @@
 package com.officebox.controller;
 
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.http.MediaType;
@@ -19,7 +20,7 @@ public class OcrPdfController {
                                       @RequestParam(defaultValue="chi_sim+eng") String lang) throws Exception {
         if(file==null||file.isEmpty()) return ResponseEntity.badRequest().build();
         Path dir=Files.createTempDirectory("officebox-ocr-");
-        try(PDDocument doc=PDDocument.load(file.getBytes())) {
+        try(PDDocument doc=Loader.loadPDF(file.getBytes())) {
             PDFRenderer renderer=new PDFRenderer(doc); StringBuilder text=new StringBuilder();
             int pages=Math.min(doc.getNumberOfPages(),50);
             for(int i=0;i<pages;i++) {
