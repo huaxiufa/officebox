@@ -4,6 +4,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,16 +17,20 @@ import java.io.ByteArrayOutputStream;
 public class PdfToolsController {
 
     @PostMapping(value = "/merge", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<byte[]> merge(@RequestParam("files") MultipartFile[] files) throws Exception {
+    public ResponseEntity<byte[]> merge(
+            @RequestParam("files") MultipartFile[] files,
+            @RequestParam(value = "password", required = false, defaultValue = "") String password) throws Exception {
         if (files == null || files.length < 2) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body("合并至少需要 2 个 PDF 文件".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
 
         int validFiles = 0;
         for (MultipartFile file : files) {
             if (file != null && !file.isEmpty()) validFiles++;
         }
-        if (validFiles < 2) return ResponseEntity.badRequest().build();
+        if (validFiles < 2) {
+            return ResponseEntity.badRequest().body("合并至少需要 2 个有效 PDF 文件".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
 
         try (PDDocument destination = new PDDocument();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -33,12 +38,25 @@ public class PdfToolsController {
             for (MultipartFile file : files) {
                 if (file == null || file.isEmpty()) continue;
 
-                // Load and append the actual document. This avoids the previous
-                // RandomAccessRead/InputStream lifecycle issue in PDFBox 3.
-                try (PDDocument source = Loader.loadPDF(file.getBytes())) {
+                try (PDDocument source = password.isBlank()
+                        ? Loader.loadPDF(file.getBytes())
+                        : Loader.loadPDF(file.getBytes(), password)) {
                     PDFMergerUtility merger = new PDFMergerUtility();
                     merger.appendDocument(destination, source);
+                } catch (InvalidPasswordException e) {
+                    String message = password.isBlank()
+                            ? "检测到加密 PDF，请填写正确的合并密码"
+                            : "PDF 密码错误，请确认所有加密 PDF 使用的密码正确";
+                    return ResponseEntity.badRequest()
+                            .contentType(MediaType.TEXT_PLAIN)
+                            .body(message.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
+            }
+
+            if (destination.getNumberOfPages() == 0) {
+                return ResponseEntity.badRequest()
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .body("没有可合并的 PDF 页面".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
 
             destination.save(out);
