@@ -1,44 +1,33 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue'
-import { Upload, Download, FileText, Loader2, Trash2 } from 'lucide-vue-next'
+import { Upload, Download, FileText, Loader2, Trash2, Archive } from 'lucide-vue-next'
 
 const files = ref<File[]>([])
 const busy = ref(false)
 const error = ref('')
 const resultUrl = ref('')
-const resultName = ref('officebox-result.pdf')
+const resultName = ref('officebox-pdf.zip')
 const supported = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
-
+const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const totalSize = computed(() => files.value.reduce((n, f) => n + f.size, 0))
 const sizeText = (n: number) => n < 1024 * 1024 ? (n / 1024).toFixed(1) + ' KB' : (n / 1024 / 1024).toFixed(2) + ' MB'
-const kind = (f: File) => {
-  const ext = '.' + (f.name.split('.').pop() || '').toLowerCase()
-  if (['.doc', '.docx'].includes(ext)) return 'Word'
-  if (['.xls', '.xlsx'].includes(ext)) return 'Excel'
-  if (['.ppt', '.pptx'].includes(ext)) return 'PowerPoint'
-  return 'Office'
-}
-function add(list: FileList | null) {
-  if (!list) return
-  const incoming = Array.from(list).filter(f => supported.includes('.' + (f.name.split('.').pop() || '').toLowerCase()))
-  files.value = [...files.value, ...incoming].slice(0, 20)
-  error.value = ''
-}
+const kind = (f: File) => { const ext = '.' + (f.name.split('.').pop() || '').toLowerCase(); if (['.doc','.docx'].includes(ext)) return 'Word'; if (['.xls','.xlsx'].includes(ext)) return 'Excel'; if (['.ppt','.pptx'].includes(ext)) return 'PowerPoint'; return 'Office' }
+function add(list: FileList | null) { if (!list) return; const incoming = Array.from(list).filter(f => supported.includes('.' + (f.name.split('.').pop() || '').toLowerCase())); files.value = [...files.value, ...incoming].slice(0, 20); error.value = ''; revoke() }
 function clear() { files.value = []; revoke() }
 function remove(i: number) { files.value.splice(i, 1); revoke() }
 function revoke() { if (resultUrl.value) URL.revokeObjectURL(resultUrl.value); resultUrl.value = '' }
 async function convert() {
   if (!files.value.length) { error.value = '请先选择 Word、Excel 或 PowerPoint 文件'; return }
-  if (files.value.length > 1) { error.value = '当前版本先支持单文件转换，请逐个转换'; return }
   busy.value = true; error.value = ''; revoke()
   try {
-    const f = files.value[0]
-    const body = new FormData(); body.append('file', f)
-    const r = await fetch('http://localhost:8080/api/office/to-pdf', { method: 'POST', body })
-    if (!r.ok) throw new Error(await r.text() || 'Office 转 PDF 失败')
+    const body = new FormData()
+    const path = files.value.length === 1 ? '/api/office/to-pdf' : '/api/office/batch-to-pdf'
+    if (files.value.length === 1) body.append('file', files.value[0]); else files.value.forEach(f => body.append('files', f))
+    const r = await fetch(`${apiBase}${path}`, { method: 'POST', body })
+    if (!r.ok) throw new Error(r.status === 422 ? '没有成功转换的文件，请检查 Office 文件是否损坏' : 'Office 转 PDF 失败')
     const blob = await r.blob()
     resultUrl.value = URL.createObjectURL(blob)
-    resultName.value = f.name.replace(/\.[^.]+$/, '') + '.pdf'
+    resultName.value = files.value.length === 1 ? files.value[0].name.replace(/\.[^.]+$/, '') + '.pdf' : 'officebox-pdf.zip'
   } catch (e) { error.value = e instanceof Error ? e.message : 'Office 转 PDF 失败' }
   finally { busy.value = false }
 }
@@ -47,12 +36,12 @@ onBeforeUnmount(revoke)
 
 <template>
   <div class="office">
-    <div class="head"><div class="icon"><FileText :size="23"/></div><div><h1>Office 转 PDF</h1><p>Word、Excel、PowerPoint 一键转换为 PDF。</p></div></div>
-    <label class="drop"><Upload :size="26"/><b>点击或拖拽 Office 文件到这里</b><span>支持 DOC、DOCX、XLS、XLSX、PPT、PPTX</span><input type="file" :accept="supported.join(',')" hidden @change="add(($event.target as HTMLInputElement).files)"/></label>
+    <div class="head"><div class="icon"><FileText :size="23"/></div><div><h1>Office 转 PDF</h1><p>Word、Excel、PowerPoint 一键转换，多个文件自动打包 ZIP。</p></div></div>
+    <label class="drop"><Upload :size="26"/><b>点击或拖拽 Office 文件到这里</b><span>支持 DOC、DOCX、XLS、XLSX、PPT、PPTX，最多 20 个</span><input type="file" :accept="supported.join(',')" multiple hidden @change="add(($event.target as HTMLInputElement).files)"/></label>
     <div v-if="files.length" class="summary"><strong>{{ files.length }} 个文件</strong><span>总大小 {{ sizeText(totalSize) }}</span><button @click="clear"><Trash2 :size="14"/>清空</button></div>
     <div v-if="files.length" class="list"><div v-for="(f,i) in files" :key="f.name+i" class="file"><div class="badge">{{ kind(f).slice(0,1) }}</div><div class="meta"><b>{{ f.name }}</b><span>{{ kind(f) }} · {{ sizeText(f.size) }}</span></div><button @click="remove(i)">×</button></div></div>
     <div v-if="error" class="error">{{ error }}</div>
-    <div class="actions"><button class="primary" :disabled="busy || !files.length" @click="convert"><Loader2 v-if="busy" class="spin"/><span>{{ busy ? '转换中…' : '转换为 PDF' }}</span></button><a v-if="resultUrl" class="download" :href="resultUrl" :download="resultName"><Download :size="16"/>下载 PDF</a></div>
+    <div class="actions"><button class="primary" :disabled="busy || !files.length" @click="convert"><Loader2 v-if="busy" class="spin"/><Archive v-else :size="16"/><span>{{ busy ? '转换中…' : files.length > 1 ? '批量转换并下载 ZIP' : '转换为 PDF' }}</span></button><a v-if="resultUrl" class="download" :href="resultUrl" :download="resultName"><Download :size="16"/>{{ files.length > 1 ? '下载 ZIP' : '下载 PDF' }}</a></a></div>
   </div>
 </template>
 
