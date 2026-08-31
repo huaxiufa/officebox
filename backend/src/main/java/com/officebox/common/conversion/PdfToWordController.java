@@ -60,6 +60,12 @@ public class PdfToWordController {
         taskService.setResult(task.id(), storageService.relativizeOutput(result));
       } catch (IOException e) {
         throw new IllegalStateException(e.getMessage(), e);
+      } finally {
+        try {
+          storageService.deleteInput(input);
+        } catch (IOException ignored) {
+          // Conversion result remains available even if cleanup fails.
+        }
       }
     });
     return ApiResponse.success("task created", task);
