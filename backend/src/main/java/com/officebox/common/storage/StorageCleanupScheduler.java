@@ -26,6 +26,7 @@ public class StorageCleanupScheduler {
     Instant cutoff = Instant.now().minus(properties.maxRetentionHours(), ChronoUnit.HOURS);
     try (Stream<Path> paths = Files.walk(root)) {
       paths.filter(Files::isRegularFile)
+          .filter(path -> !path.equals(root.resolve("tasks.json")))
           .filter(path -> {
             try { return Files.getLastModifiedTime(path).toInstant().isBefore(cutoff); }
             catch (IOException e) { return false; }
