@@ -86,12 +86,13 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          content = b"BT /F1 18 Tf 72 720 Td (OfficeBox E2E) Tj ET\n"
           objects = [
               b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
               b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
               b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
               b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-              b"5 0 obj\n<< /Length 44 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox E2E) Tj ET\nendstream\nendobj\n",
+              f"5 0 obj\n<< /Length {len(content)} >>\nstream\n".encode() + content + b"endstream\nendobj\n",
           ]
           pdf = bytearray(b"%PDF-1.4\n")
           offsets = [0]
