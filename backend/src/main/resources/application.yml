@@ -1,7 +1,14 @@
 server:
   port: 8080
+
 spring:
   servlet:
     multipart:
       max-file-size: 100MB
       max-request-size: 500MB
+
+# V2 shared storage defaults. Existing V1 endpoints remain unchanged.
+officebox:
+  storage:
+    root: ${OFFICEBOX_STORAGE_ROOT:./data}
+    max-retention-hours: ${OFFICEBOX_STORAGE_MAX_RETENTION_HOURS:24}
