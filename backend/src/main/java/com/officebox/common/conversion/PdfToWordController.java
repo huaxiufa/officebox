@@ -1,10 +1,9 @@
 package com.officebox.common.conversion;
 
+import com.officebox.common.storage.StorageProperties;
 import com.officebox.common.task.Task;
 import com.officebox.common.task.TaskRunner;
 import com.officebox.common.task.TaskService;
-import com.officebox.common.task.TaskProgress;
-import com.officebox.common.storage.StorageProperties;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -36,18 +35,20 @@ public class PdfToWordController {
     String original = file.getOriginalFilename() == null ? "document.pdf" : Path.of(file.getOriginalFilename()).getFileName().toString();
     if (!original.toLowerCase().endsWith(".pdf")) throw new IllegalArgumentException("Input must be a PDF");
 
-    Path inputDir = Path.of(storage.root()).toAbsolutePath().normalize().resolve("input");
-    Path outputDir = Path.of(storage.root()).toAbsolutePath().normalize().resolve("output");
+    Path root = Path.of(storage.root()).toAbsolutePath().normalize();
+    Path inputDir = root.resolve("input");
+    Path outputDir = root.resolve("output");
     Files.createDirectories(inputDir);
     Files.createDirectories(outputDir);
     UUID id = UUID.randomUUID();
     Path input = inputDir.resolve(id + "-" + original).normalize();
-    Files.write(input, file.getBytes());
+    if (!input.startsWith(inputDir)) throw new IllegalArgumentException("Invalid input path");
+    Files.copy(file.getInputStream(), input);
 
     Task task = taskService.create("PDF_TO_WORD", input.toString());
-    taskRunner.submit(task.id(), progress -> {
+    taskRunner.run(task.id(), progress -> {
       Path result = converter.convert(input, outputDir.resolve(task.id().toString()), progress);
-      taskService.markSuccess(task.id(), result.toString());
+      taskService.setResult(task.id(), result.toString());
     });
     return task;
   }
