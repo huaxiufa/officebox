@@ -15,7 +15,7 @@ RUN mvn -f backend/pom.xml package -DskipTests -B
 
 FROM eclipse-temurin:21-jre-jammy
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libreoffice ghostscript curl tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
+    && apt-get install -y --no-install-recommends libreoffice ghostscript poppler-utils curl tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend-build /app/backend/target/*.jar /app/officebox.jar
