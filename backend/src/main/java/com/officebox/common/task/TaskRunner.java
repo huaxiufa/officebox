@@ -24,8 +24,11 @@ public class TaskRunner {
 
   public CompletableFuture<Task> run(UUID taskId, Consumer<TaskProgress> operation) {
     return CompletableFuture.supplyAsync(() -> {
-      taskService.markProcessing(taskId);
       try {
+        Task processing = taskService.markProcessing(taskId);
+        if (processing == null) {
+          throw new IllegalArgumentException("Task not found: " + taskId);
+        }
         operation.accept(new ProgressReporter(taskId));
         Task current = taskService.get(taskId);
         if (current == null || current.resultFile() == null || current.resultFile().isBlank()) {
