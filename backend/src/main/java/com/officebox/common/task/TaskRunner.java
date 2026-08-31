@@ -13,6 +13,11 @@ public class TaskRunner {
   private final TaskService taskService;
   private final Executor executor;
 
+  public TaskRunner(TaskService taskService, Supplier<Executor> executor) {
+    this.taskService = taskService;
+    this.executor = executor.get();
+  }
+
   public TaskRunner(TaskService taskService, @Qualifier("officeBoxTaskExecutor") Executor executor) {
     this.taskService = taskService;
     this.executor = executor;
@@ -22,7 +27,7 @@ public class TaskRunner {
     return run(taskId, progress -> operation.get());
   }
 
-  public CompletableFuture<Task> run(UUID taskId, Consumer<TaskProgress> operation) {
+  public CompletableFuture<Task> run(UUID taskId, Consumer<Consumer<TaskProgress>> operation) {
     return CompletableFuture.supplyAsync(() -> {
       try {
         Task processing = taskService.markProcessing(taskId);
