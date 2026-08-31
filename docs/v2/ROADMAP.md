@@ -14,10 +14,11 @@ OfficeBox V2 is an open-source, self-hostable online office platform. V2 builds 
 - [x] Task API foundation
 - [x] Temporary-file cleanup foundation
 - [x] Verified V1 baseline
-- [ ] Persistent task repository
-- [ ] Async task execution / queue
+- [x] Persistent task state
+- [x] Bounded async task executor
+- [x] Task lifecycle runner
+- [x] Result download API
 - [ ] Task progress reporting
-- [ ] Result download API
 - [ ] File lifecycle integration tests
 - [ ] CI quality gates
 
