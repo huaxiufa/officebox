@@ -4,7 +4,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -16,10 +15,6 @@ public class TaskRunner {
   public TaskRunner(TaskService taskService, @Qualifier("officeBoxTaskExecutor") Executor executor) {
     this.taskService = taskService;
     this.executor = executor;
-  }
-
-  public CompletableFuture<Task> run(UUID taskId, Supplier<String> operation) {
-    return run(taskId, progress -> operation.get());
   }
 
   public CompletableFuture<Task> run(UUID taskId, Consumer<Consumer<TaskProgress>> operation) {
