@@ -51,21 +51,18 @@ public class TaskController {
   @GetMapping("/{id}/result")
   public ResponseEntity<Resource> result(@PathVariable UUID id) throws IOException {
     Task task = taskService.get(id);
-    if (task == null) {
-      return ResponseEntity.notFound().build();
-    }
-    if (task.status() != TaskStatus.SUCCESS || task.resultFile() == null) {
+    if (task == null) return ResponseEntity.notFound().build();
+    if (task.status() != TaskStatus.SUCCESS || task.resultFile() == null || task.resultFile().isBlank()) {
       return ResponseEntity.status(409).build();
     }
     Path result = storageService.resolveOutput(task.resultFile());
-    if (!Files.isRegularFile(result)) {
-      return ResponseEntity.notFound().build();
-    }
+    if (!Files.isRegularFile(result)) return ResponseEntity.notFound().build();
+    String filename = result.getFileName().toString().replace("\"", "").replace("\r", "").replace("\n", "");
     Resource resource = new FileSystemResource(result);
     return ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_OCTET_STREAM)
         .contentLength(Files.size(result))
-        .header("Content-Disposition", "attachment; filename=\"" + result.getFileName() + "\"")
+        .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
         .body(resource);
   }
 }
