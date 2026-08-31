@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.officebox.common.storage.StorageProperties;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,8 +15,12 @@ class TaskServiceTest {
   @TempDir
   Path tempDir;
 
+  private ObjectMapper objectMapper() {
+    return JsonMapper.builder().findAndAddModules().build();
+  }
+
   private TaskService service() {
-    return new TaskService(new ObjectMapper(), new StorageProperties(tempDir.toString(), 24));
+    return new TaskService(objectMapper(), new StorageProperties(tempDir.toString(), 24));
   }
 
   @Test
@@ -34,7 +39,7 @@ class TaskServiceTest {
     assertEquals(TaskStatus.SUCCESS, success.status());
     assertEquals(100, success.progress());
 
-    TaskService reloaded = new TaskService(new ObjectMapper(), new StorageProperties(tempDir.toString(), 24));
+    TaskService reloaded = new TaskService(objectMapper(), new StorageProperties(tempDir.toString(), 24));
     Task persisted = reloaded.get(created.id());
     assertEquals(TaskStatus.SUCCESS, persisted.status());
     assertEquals(100, persisted.progress());
