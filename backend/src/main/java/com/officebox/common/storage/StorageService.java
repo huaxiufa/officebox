@@ -59,6 +59,26 @@ public class StorageService {
     return output.relativize(candidate).toString();
   }
 
+  public void deleteInput(Path input) throws IOException {
+    if (input == null) return;
+    Path inputRoot = root.resolve("input").toAbsolutePath().normalize();
+    Path candidate = input.toAbsolutePath().normalize();
+    if (!candidate.startsWith(inputRoot)) {
+      throw new IOException("Invalid input path");
+    }
+    Files.deleteIfExists(candidate);
+  }
+
+  public void deleteOutput(Path outputFile) throws IOException {
+    if (outputFile == null) return;
+    Path outputRoot = root.resolve("output").toAbsolutePath().normalize();
+    Path candidate = outputFile.toAbsolutePath().normalize();
+    if (!candidate.startsWith(outputRoot)) {
+      throw new IOException("Invalid output path");
+    }
+    Files.deleteIfExists(candidate);
+  }
+
   public Path root() {
     return root;
   }
