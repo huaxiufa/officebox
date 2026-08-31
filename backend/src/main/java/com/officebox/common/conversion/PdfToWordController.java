@@ -4,6 +4,7 @@ import com.officebox.common.storage.StorageProperties;
 import com.officebox.common.task.Task;
 import com.officebox.common.task.TaskRunner;
 import com.officebox.common.task.TaskService;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -30,7 +31,7 @@ public class PdfToWordController {
   }
 
   @PostMapping(value = "/to-word", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-  public Task convert(@RequestParam("file") MultipartFile file) throws Exception {
+  public Task convert(@RequestParam("file") MultipartFile file) throws IOException {
     if (file.isEmpty()) throw new IllegalArgumentException("PDF file is required");
     String original = file.getOriginalFilename() == null ? "document.pdf" : Path.of(file.getOriginalFilename()).getFileName().toString();
     if (!original.toLowerCase().endsWith(".pdf")) throw new IllegalArgumentException("Input must be a PDF");
@@ -47,8 +48,12 @@ public class PdfToWordController {
 
     Task task = taskService.create("PDF_TO_WORD", input.toString());
     taskRunner.run(task.id(), progress -> {
-      Path result = converter.convert(input, outputDir.resolve(task.id().toString()), progress);
-      taskService.setResult(task.id(), result.toString());
+      try {
+        Path result = converter.convert(input, outputDir.resolve(task.id().toString()), progress);
+        taskService.setResult(task.id(), result.toString());
+      } catch (IOException e) {
+        throw new IllegalStateException(e.getMessage(), e);
+      }
     });
     return task;
   }
