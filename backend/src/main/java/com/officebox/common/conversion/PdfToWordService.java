@@ -15,27 +15,43 @@ public class PdfToWordService {
   private final String executable;
 
   public PdfToWordService() {
-    this.executable = System.getenv().getOrDefault("OFFICEBOX_SOFFICE", "soffice");
+    this(System.getenv().getOrDefault("OFFICEBOX_SOFFICE", "soffice"));
+  }
+
+  PdfToWordService(String executable) {
+    this.executable = executable;
   }
 
   public Path convert(Path input, Path outputDirectory, Consumer<TaskProgress> progress) throws IOException {
-    if (!Files.isRegularFile(input)) throw new IOException("Input PDF does not exist");
-    if (!input.getFileName().toString().toLowerCase().endsWith(".pdf")) throw new IOException("Input must be a PDF");
-    Files.createDirectories(outputDirectory);
+    if (input == null || !Files.isRegularFile(input)) {
+      throw new IOException("Input PDF does not exist");
+    }
+    if (!input.getFileName().toString().toLowerCase().endsWith(".pdf")) {
+      throw new IOException("Input must be a PDF");
+    }
+    if (progress == null) {
+      throw new IOException("Progress reporter is required");
+    }
+
+    Path outputRoot = outputDirectory.toAbsolutePath().normalize();
+    Files.createDirectories(outputRoot);
     progress.accept(new TaskProgress(10, "Preparing PDF conversion"));
 
-    Process process = new ProcessBuilder(List.of(
-        executable, "--headless", "--convert-to", "docx", "--outdir", outputDirectory.toString(), input.toAbsolutePath().toString()))
-        .redirectErrorStream(true)
-        .start();
+    ProcessBuilder builder = new ProcessBuilder(List.of(
+        executable, "--headless", "--convert-to", "docx", "--outdir",
+        outputRoot.toString(), input.toAbsolutePath().toString()));
+    builder.redirectErrorStream(true);
+    builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+    Process process = builder.start();
     try {
       progress.accept(new TaskProgress(35, "Converting PDF to DOCX"));
       if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
         process.destroyForcibly();
         throw new IOException("PDF to Word conversion timed out");
       }
-      String output = new String(process.getInputStream().readAllBytes());
-      if (process.exitValue() != 0) throw new IOException("LibreOffice conversion failed: " + output.trim());
+      if (process.exitValue() != 0) {
+        throw new IOException("LibreOffice conversion failed with exit code " + process.exitValue());
+      }
     } catch (InterruptedException e) {
       process.destroyForcibly();
       Thread.currentThread().interrupt();
@@ -43,9 +59,9 @@ public class PdfToWordService {
     }
 
     String base = stripExtension(input.getFileName().toString());
-    Path result = outputDirectory.resolve(base + ".docx").normalize();
-    if (!result.startsWith(outputDirectory.toAbsolutePath().normalize()) || !Files.isRegularFile(result)) {
-      throw new IOException("Conversion did not produce a DOCX result");
+    Path result = outputRoot.resolve(base + ".docx").normalize();
+    if (!result.startsWith(outputRoot) || !Files.isRegularFile(result) || Files.size(result) == 0) {
+      throw new IOException("Conversion did not produce a valid DOCX result");
     }
     progress.accept(new TaskProgress(95, "DOCX generated"));
     return result;
