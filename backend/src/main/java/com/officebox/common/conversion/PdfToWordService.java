@@ -4,7 +4,9 @@ import com.officebox.common.task.TaskProgress;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.springframework.stereotype.Service;
@@ -37,9 +39,12 @@ public class PdfToWordService {
     Files.createDirectories(outputRoot);
     progress.accept(new TaskProgress(10, "Preparing PDF conversion"));
 
+    Path profile = Files.createTempDirectory(outputRoot, ".lo-profile-");
+    String profileUrl = profile.toUri().toString();
     ProcessBuilder builder = new ProcessBuilder(List.of(
-        executable, "--headless", "--convert-to", "docx", "--outdir",
-        outputRoot.toString(), input.toAbsolutePath().toString()));
+        executable, "--headless", "--nologo", "--nodefault", "--nofirststartwizard",
+        "-env:UserInstallation=" + profileUrl,
+        "--convert-to", "docx", "--outdir", outputRoot.toString(), input.toAbsolutePath().toString()));
     builder.redirectErrorStream(true);
     builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
     Process process = builder.start();
@@ -56,6 +61,8 @@ public class PdfToWordService {
       process.destroyForcibly();
       Thread.currentThread().interrupt();
       throw new IOException("PDF to Word conversion interrupted", e);
+    } finally {
+      deleteTree(profile);
     }
 
     String base = stripExtension(input.getFileName().toString());
@@ -65,6 +72,24 @@ public class PdfToWordService {
     }
     progress.accept(new TaskProgress(95, "DOCX generated"));
     return result;
+  }
+
+  private static void deleteTree(Path root) {
+    try {
+      if (root != null && Files.exists(root)) {
+        try (var paths = Files.walk(root)) {
+          paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+            try {
+              Files.deleteIfExists(path);
+            } catch (IOException ignored) {
+              // Best-effort cleanup; conversion result remains available.
+            }
+          });
+        }
+      }
+    } catch (IOException ignored) {
+      // Best-effort cleanup; conversion result remains available.
+    }
   }
 
   private static String stripExtension(String name) {
