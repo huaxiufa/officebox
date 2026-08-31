@@ -80,6 +80,54 @@ jobs:
           exit 1
       - name: Verify frontend
         run: curl -fsS http://127.0.0.1:18080/ | head -c 1000
+      - name: Verify PDF to Word end-to-end
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          objects = [
+              b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+              b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+              b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+              b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+              b"5 0 obj\n<< /Length 44 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox E2E) Tj ET\nendstream\nendobj\n",
+          ]
+          pdf = bytearray(b"%PDF-1.4\n")
+          offsets = [0]
+          for obj in objects:
+              offsets.append(len(pdf))
+              pdf.extend(obj)
+          xref = len(pdf)
+          pdf.extend(f"xref\n0 {len(objects)+1}\n".encode())
+          pdf.extend(b"0000000000 65535 f \n")
+          for off in offsets[1:]:
+              pdf.extend(f"{off:010d} 00000 n \n".encode())
+          pdf.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+          Path("e2e-input.pdf").write_bytes(pdf)
+          PY
+
+          response="$(curl -fsS -X POST -F file=@e2e-input.pdf http://127.0.0.1:18080/api/v2/pdf/to-word)"
+          task_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])' <<< "$response")"
+          test -n "$task_id"
+
+          for i in $(seq 1 60); do
+            task="$(curl -fsS http://127.0.0.1:18080/api/v2/tasks/$task_id)"
+            status="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])' <<< "$task")"
+            echo "task=$task_id status=$status"
+            if [ "$status" = "SUCCESS" ]; then
+              break
+            fi
+            if [ "$status" = "FAILED" ]; then
+              echo "$task" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          test "$status" = "SUCCESS"
+          curl -fsS -o e2e-output.docx http://127.0.0.1:18080/api/v2/tasks/$task_id/result
+          test -s e2e-output.docx
+          unzip -t e2e-output.docx
       - name: Show container status
         if: always()
         run: docker ps -a --filter name=officebox-smoke
