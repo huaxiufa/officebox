@@ -1,7 +1,6 @@
 package com.officebox.common.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,9 +35,10 @@ class TaskServiceTest {
     assertEquals(100, success.progress());
 
     TaskService reloaded = new TaskService(new ObjectMapper(), new StorageProperties(tempDir.toString(), 24));
-    assertEquals(success.status(), reloaded.get(created.id()).status());
-    assertEquals(65, reloaded.get(created.id()).progress());
-    assertEquals("task-1/result.docx", reloaded.get(created.id()).resultFile());
+    Task persisted = reloaded.get(created.id());
+    assertEquals(TaskStatus.SUCCESS, persisted.status());
+    assertEquals(100, persisted.progress());
+    assertEquals("task-1/result.docx", persisted.resultFile());
     assertTrue(Files.readString(tempDir.resolve("tasks.json")).contains(created.id().toString()));
   }
 
