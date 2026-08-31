@@ -36,6 +36,15 @@ public class StorageService {
     return target;
   }
 
+  public Path resolveOutput(String storedPath) throws IOException {
+    Path output = root.resolve("output").toAbsolutePath().normalize();
+    Path candidate = Path.of(storedPath).toAbsolutePath().normalize();
+    if (!candidate.startsWith(output)) {
+      throw new IOException("Invalid result path");
+    }
+    return candidate;
+  }
+
   public Path root() {
     return root;
   }
