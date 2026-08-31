@@ -1,6 +1,8 @@
 package com.officebox.common.conversion;
 
+import com.officebox.common.api.ApiResponse;
 import com.officebox.common.storage.StorageProperties;
+import com.officebox.common.storage.StorageService;
 import com.officebox.common.task.Task;
 import com.officebox.common.task.TaskRunner;
 import com.officebox.common.task.TaskService;
@@ -22,16 +24,19 @@ public class PdfToWordController {
   private final TaskRunner taskRunner;
   private final PdfToWordService converter;
   private final StorageProperties storage;
+  private final StorageService storageService;
 
-  public PdfToWordController(TaskService taskService, TaskRunner taskRunner, PdfToWordService converter, StorageProperties storage) {
+  public PdfToWordController(TaskService taskService, TaskRunner taskRunner, PdfToWordService converter,
+      StorageProperties storage, StorageService storageService) {
     this.taskService = taskService;
     this.taskRunner = taskRunner;
     this.converter = converter;
     this.storage = storage;
+    this.storageService = storageService;
   }
 
   @PostMapping(value = "/to-word", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-  public Task convert(@RequestParam("file") MultipartFile file) throws IOException {
+  public ApiResponse<Task> convert(@RequestParam("file") MultipartFile file) throws IOException {
     if (file.isEmpty()) throw new IllegalArgumentException("PDF file is required");
     String original = file.getOriginalFilename() == null ? "document.pdf" : Path.of(file.getOriginalFilename()).getFileName().toString();
     if (!original.toLowerCase().endsWith(".pdf")) throw new IllegalArgumentException("Input must be a PDF");
@@ -44,17 +49,19 @@ public class PdfToWordController {
     UUID id = UUID.randomUUID();
     Path input = inputDir.resolve(id + "-" + original).normalize();
     if (!input.startsWith(inputDir)) throw new IllegalArgumentException("Invalid input path");
-    Files.copy(file.getInputStream(), input);
+    try (var stream = file.getInputStream()) {
+      Files.copy(stream, input);
+    }
 
     Task task = taskService.create("PDF_TO_WORD", input.toString());
     taskRunner.run(task.id(), progress -> {
       try {
         Path result = converter.convert(input, outputDir.resolve(task.id().toString()), progress);
-        taskService.setResult(task.id(), result.toString());
+        taskService.setResult(task.id(), storageService.relativizeOutput(result));
       } catch (IOException e) {
         throw new IllegalStateException(e.getMessage(), e);
       }
     });
-    return task;
+    return ApiResponse.success("task created", task);
   }
 }
