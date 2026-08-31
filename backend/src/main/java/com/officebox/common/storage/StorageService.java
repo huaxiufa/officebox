@@ -26,8 +26,9 @@ public class StorageService {
   public Path storeInput(MultipartFile file) throws IOException {
     initialize();
     String original = file.getOriginalFilename() == null ? "file" : Path.of(file.getOriginalFilename()).getFileName().toString();
-    Path target = root.resolve("input").resolve(UUID.randomUUID() + "-" + original).normalize();
-    if (!target.startsWith(root.resolve("input"))) {
+    Path inputDir = root.resolve("input").toAbsolutePath().normalize();
+    Path target = inputDir.resolve(UUID.randomUUID() + "-" + original).normalize();
+    if (!target.startsWith(inputDir)) {
       throw new IOException("Invalid file path");
     }
     try (InputStream input = file.getInputStream()) {
@@ -37,12 +38,25 @@ public class StorageService {
   }
 
   public Path resolveOutput(String storedPath) throws IOException {
+    if (storedPath == null || storedPath.isBlank()) {
+      throw new IOException("Result path is required");
+    }
     Path output = root.resolve("output").toAbsolutePath().normalize();
-    Path candidate = Path.of(storedPath).toAbsolutePath().normalize();
+    Path raw = Path.of(storedPath);
+    Path candidate = raw.isAbsolute() ? raw.toAbsolutePath().normalize() : output.resolve(raw).normalize();
     if (!candidate.startsWith(output)) {
       throw new IOException("Invalid result path");
     }
     return candidate;
+  }
+
+  public String relativizeOutput(Path result) throws IOException {
+    Path output = root.resolve("output").toAbsolutePath().normalize();
+    Path candidate = result.toAbsolutePath().normalize();
+    if (!candidate.startsWith(output)) {
+      throw new IOException("Invalid result path");
+    }
+    return output.relativize(candidate).toString();
   }
 
   public Path root() {
