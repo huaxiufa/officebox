@@ -2,6 +2,7 @@ package com.officebox.common.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.officebox.common.storage.StorageProperties;
@@ -25,12 +26,20 @@ class TaskServiceTest {
 
     assertEquals(TaskStatus.QUEUED, created.status());
     assertEquals(TaskStatus.PROCESSING, service.markProcessing(created.id()).status());
-    Task success = service.markSuccess(created.id(), tempDir.resolve("output/result.pdf").toString());
+    Task progressed = service.updateProgress(created.id(), new TaskProgress(65, "Converting"));
+    assertEquals(65, progressed.progress());
+    assertEquals("Converting", progressed.progressMessage());
+    Task withResult = service.setResult(created.id(), "task-1/result.docx");
+    assertEquals("task-1/result.docx", withResult.resultFile());
+    Task success = service.markSuccess(created.id(), withResult.resultFile());
     assertEquals(TaskStatus.SUCCESS, success.status());
-    assertNotNull(success.resultFile());
+    assertEquals(100, success.progress());
+
     TaskService reloaded = new TaskService(new ObjectMapper(), new StorageProperties(tempDir.toString(), 24));
     assertEquals(success.status(), reloaded.get(created.id()).status());
-    assertNotNull(Files.readString(tempDir.resolve("tasks.json")));
+    assertEquals(65, reloaded.get(created.id()).progress());
+    assertEquals("task-1/result.docx", reloaded.get(created.id()).resultFile());
+    assertTrue(Files.readString(tempDir.resolve("tasks.json")).contains(created.id().toString()));
   }
 
   @Test
@@ -42,5 +51,11 @@ class TaskServiceTest {
     assertEquals(TaskStatus.FAILED, failed.status());
     assertEquals(created.inputFile(), failed.inputFile());
     assertEquals("processing failed", failed.error());
+  }
+
+  @Test
+  void rejectsProgressOutsideRange() {
+    org.junit.jupiter.api.Assertions.assertThrows(
+        IllegalArgumentException.class, () -> new TaskProgress(101, "too far"));
   }
 }
