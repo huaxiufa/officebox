@@ -3,8 +3,13 @@ package com.officebox.common.task;
 import com.officebox.common.api.ApiResponse;
 import com.officebox.common.storage.StorageService;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,5 +46,26 @@ public class TaskController {
       throw new IllegalArgumentException("Task not found: " + id);
     }
     return ApiResponse.success(task);
+  }
+
+  @GetMapping("/{id}/result")
+  public ResponseEntity<Resource> result(@PathVariable UUID id) throws IOException {
+    Task task = taskService.get(id);
+    if (task == null) {
+      return ResponseEntity.notFound().build();
+    }
+    if (task.status() != TaskStatus.SUCCESS || task.resultFile() == null) {
+      return ResponseEntity.status(409).build();
+    }
+    Path result = storageService.resolveOutput(task.resultFile());
+    if (!Files.isRegularFile(result)) {
+      return ResponseEntity.notFound().build();
+    }
+    Resource resource = new FileSystemResource(result);
+    return ResponseEntity.ok()
+        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+        .contentLength(Files.size(result))
+        .header("Content-Disposition", "attachment; filename=\"" + result.getFileName() + "\"")
+        .body(resource);
   }
 }
