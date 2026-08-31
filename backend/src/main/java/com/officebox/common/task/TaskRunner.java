@@ -13,11 +13,6 @@ public class TaskRunner {
   private final TaskService taskService;
   private final Executor executor;
 
-  public TaskRunner(TaskService taskService, Supplier<Executor> executor) {
-    this.taskService = taskService;
-    this.executor = executor.get();
-  }
-
   public TaskRunner(TaskService taskService, @Qualifier("officeBoxTaskExecutor") Executor executor) {
     this.taskService = taskService;
     this.executor = executor;
