@@ -16,6 +16,7 @@ import javax.imageio.ImageIO;
 import org.apache.pdfbox.contentstream.PDFStreamEngine;
 import org.apache.pdfbox.contentstream.operator.DrawObject;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
@@ -77,15 +78,15 @@ public class PdfPageParser {
       blocks.add(new TextBlock(new BoundingBox(minX, minY, maxX - minX, maxY - minY), spans, heading));
     }
 
-    // Keep the page artwork itself. This preserves vector backgrounds, logos, shapes and
-    // other paint operations that cannot be represented faithfully by ordinary DOCX runs.
-    // The renderer can use this image as a visual fallback while the extracted text remains editable.
+    // Keep a page artwork fallback for pages whose appearance is primarily vector paint.
     blocks.add(renderPageArtwork(document, pageNumber, width, height));
 
+    // Also retain native raster images separately. The renderer removes the full-page fallback
+    // on text-bearing pages, so these extracted images can survive as individual editable-page
+    // assets (logos, portraits, signatures, embedded photos) instead of being lost entirely.
     ImageExtractor extractor = new ImageExtractor(width, height);
     extractor.processPage(page);
-    // Extracted images are retained for future selective/high-resolution placement. Do not add
-    // them here when a full-page artwork image is present, otherwise logos/backgrounds are doubled.
+    blocks.addAll(extractor.images());
 
     blocks.sort(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
         .thenComparingDouble(b -> b.bounds().x()));
@@ -115,7 +116,7 @@ public class PdfPageParser {
 
     @Override
     protected void processOperator(org.apache.pdfbox.contentstream.operator.Operator operator,
-                                   List<org.apache.pdfbox.cos.COSBase> operands) throws IOException {
+                                   List<COSBase> operands) throws IOException {
       if (COSName.DRAW_OBJECT.getName().equals(operator.getName()) && !operands.isEmpty()
           && operands.get(0) instanceof COSName name) {
         PDXObject xObject = getResources().getXObject(name);
