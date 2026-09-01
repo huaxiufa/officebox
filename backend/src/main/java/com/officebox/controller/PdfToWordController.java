@@ -12,7 +12,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/pdf")
 public class PdfToWordController {
-    private final PdfToWordService pdfToWordService = new PdfToWordService();
+    private final PdfToWordService pdfToWordService;
+
+    public PdfToWordController(PdfToWordService pdfToWordService) {
+        this.pdfToWordService = pdfToWordService;
+    }
 
     @PostMapping(value = "/to-word", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<byte[]> toWord(@RequestParam("file") MultipartFile file) {
