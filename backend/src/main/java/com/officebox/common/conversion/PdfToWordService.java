@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** Coordinates PDF parsing and editable DOCX rendering. */
@@ -18,9 +19,16 @@ public class PdfToWordService {
   private final PdfPageParser pageParser;
   private final DocxRenderer renderer;
 
+  /** Spring constructor: dependencies are explicit and unambiguous. */
+  @Autowired
   public PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer) {
     this.pageParser = pageParser;
     this.renderer = renderer;
+  }
+
+  /** Backward-compatible constructor for focused unit tests and callers that only customize parsing. */
+  public PdfToWordService(PdfPageParser pageParser) {
+    this(pageParser, new DocxRenderer());
   }
 
   public Path convert(Path input, Path outputDirectory, Consumer<TaskProgress> progress) throws IOException {
