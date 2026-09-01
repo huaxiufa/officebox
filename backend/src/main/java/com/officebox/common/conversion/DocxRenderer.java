@@ -21,7 +21,6 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
-import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.Document;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
@@ -68,10 +67,10 @@ public class DocxRenderer {
 
     ColumnLayout columns = detectColumns(textBlocks, page.width());
     if (columns.twoColumns) renderTwoColumns(document, page.blocks(), columns.split, page.width());
-    else renderSingleColumn(document, page.blocks(), page.width());
+    else renderSingleColumn(document, page.blocks());
   }
 
-  private void renderSingleColumn(XWPFDocument document, List<PageBlock> blocks, double pageWidth) {
+  private void renderSingleColumn(XWPFDocument document, List<PageBlock> blocks) {
     double previousBottom = 0;
     for (PageBlock block : blocks.stream().sorted(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
         .thenComparingDouble(b -> b.bounds().x())).toList()) {
@@ -80,11 +79,8 @@ public class DocxRenderer {
       paragraph.setSpacingBefore((int) Math.round(yGap));
       paragraph.setSpacingAfter(0);
       paragraph.setIndentationLeft((int) Math.round(Math.max(0, block.bounds().x())));
-      if (block instanceof TextBlock text) {
-        writeSpans(paragraph, text.spans());
-      } else if (block instanceof ImageBlock image) {
-        writeImage(paragraph, image);
-      }
+      if (block instanceof TextBlock text) writeSpans(paragraph, text.spans());
+      else if (block instanceof ImageBlock image) writeImage(paragraph, image);
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
     }
   }
@@ -128,11 +124,37 @@ public class DocxRenderer {
       XWPFRun run = paragraph.createRun();
       int width = Math.max(1, Units.toEMU(image.bounds().width()));
       int height = Math.max(1, Units.toEMU(image.bounds().height()));
-      run.addPicture(new ByteArrayInputStream(image.data()), Document.PICTURE_TYPE_PNG,
-          "pdf-image.png", width, height);
+      int pictureType = pictureType(image.mimeType());
+      String extension = extension(image.mimeType());
+      run.addPicture(new ByteArrayInputStream(image.data()), pictureType,
+          "pdf-image." + extension, width, height);
     } catch (Exception e) {
       throw new IllegalStateException("Unable to embed PDF image", e);
     }
+  }
+
+  private static int pictureType(String mime) {
+    if (mime == null) return Document.PICTURE_TYPE_PNG;
+    return switch (mime.toLowerCase()) {
+      case "image/jpeg", "image/jpg" -> Document.PICTURE_TYPE_JPEG;
+      case "image/gif" -> Document.PICTURE_TYPE_GIF;
+      case "image/bmp" -> Document.PICTURE_TYPE_BMP;
+      case "image/emf" -> Document.PICTURE_TYPE_EMF;
+      case "image/wmf" -> Document.PICTURE_TYPE_WMF;
+      default -> Document.PICTURE_TYPE_PNG;
+    };
+  }
+
+  private static String extension(String mime) {
+    if (mime == null) return "png";
+    return switch (mime.toLowerCase()) {
+      case "image/jpeg", "image/jpg" -> "jpg";
+      case "image/gif" -> "gif";
+      case "image/bmp" -> "bmp";
+      case "image/emf" -> "emf";
+      case "image/wmf" -> "wmf";
+      default -> "png";
+    };
   }
 
   private static void writeSpans(XWPFParagraph paragraph, List<TextSpan> spans) {
