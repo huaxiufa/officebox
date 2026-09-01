@@ -76,9 +76,9 @@ public class DocxRenderer {
         .thenComparingDouble(b -> b.bounds().x())).toList()) {
       XWPFParagraph paragraph = document.createParagraph();
       double yGap = Math.max(0, block.bounds().y() - previousBottom);
-      paragraph.setSpacingBefore((int) Math.round(yGap));
+      paragraph.setSpacingBefore(twips(yGap));
       paragraph.setSpacingAfter(0);
-      paragraph.setIndentationLeft((int) Math.round(Math.max(0, block.bounds().x())));
+      paragraph.setIndentationLeft(twips(Math.max(0, block.bounds().x())));
       if (block instanceof TextBlock text) writeSpans(paragraph, text.spans());
       else if (block instanceof ImageBlock image) writeImage(paragraph, image);
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
@@ -110,9 +110,9 @@ public class DocxRenderer {
         .thenComparingDouble(b -> b.bounds().x())).toList()) {
       XWPFParagraph paragraph = cell.addParagraph();
       double yGap = Math.max(0, block.bounds().y() - previousBottom);
-      paragraph.setSpacingBefore((int) Math.round(yGap));
+      paragraph.setSpacingBefore(twips(yGap));
       paragraph.setSpacingAfter(0);
-      paragraph.setIndentationLeft((int) Math.round(Math.max(0, block.bounds().x() - originX)));
+      paragraph.setIndentationLeft(twips(Math.max(0, block.bounds().x() - originX)));
       if (block instanceof TextBlock text) writeSpans(paragraph, text.spans());
       else if (block instanceof ImageBlock image) writeImage(paragraph, image);
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
