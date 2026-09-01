@@ -3,6 +3,7 @@ package com.officebox.common.conversion;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.officebox.common.conversion.model.TextBlock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.apache.pdfbox.Loader;
@@ -40,10 +41,13 @@ class PdfPageParserTest {
         var model = new PdfPageParser().parse(document, 1);
         assertEquals(1, model.pageNumber());
         assertEquals(2, model.blocks().size());
-        assertEquals("OfficeBox", model.blocks().get(0).text());
-        assertTrue(model.blocks().get(0).heading());
-        assertEquals("Editable document conversion", model.blocks().get(1).text());
-        assertTrue(model.blocks().get(0).bounds().y() < model.blocks().get(1).bounds().y());
+
+        TextBlock heading = (TextBlock) model.blocks().get(0);
+        TextBlock body = (TextBlock) model.blocks().get(1);
+        assertEquals("OfficeBox", heading.text());
+        assertTrue(heading.heading());
+        assertEquals("Editable document conversion", body.text());
+        assertTrue(heading.bounds().y() < body.bounds().y());
       }
     } finally {
       Files.deleteIfExists(pdf);
