@@ -1,20 +1,31 @@
 package com.officebox.common.conversion;
 
 import com.officebox.common.conversion.model.BoundingBox;
+import com.officebox.common.conversion.model.ImageBlock;
+import com.officebox.common.conversion.model.PageBlock;
 import com.officebox.common.conversion.model.PageModel;
 import com.officebox.common.conversion.model.TextBlock;
 import com.officebox.common.conversion.model.TextSpan;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import javax.imageio.ImageIO;
+import org.apache.pdfbox.contentstream.PDFStreamEngine;
+import org.apache.pdfbox.contentstream.operator.DrawObject;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
+import org.apache.pdfbox.util.Matrix;
 import org.springframework.stereotype.Component;
 
-/** Extracts PDF text into a coordinate-aware intermediate representation. */
+/** Extracts PDF text and raster images into a coordinate-aware intermediate representation. */
 @Component
 public class PdfPageParser {
   public PageModel parse(PDDocument document, int pageNumber) throws IOException {
@@ -28,7 +39,7 @@ public class PdfPageParser {
     stripper.setEndPage(pageNumber);
     stripper.getText(document);
 
-    List<TextBlock> blocks = new ArrayList<>();
+    List<PageBlock> blocks = new ArrayList<>();
     for (Line line : stripper.lines()) {
       if (line.glyphs.isEmpty()) continue;
       List<TextSpan> spans = new ArrayList<>();
@@ -37,8 +48,7 @@ public class PdfPageParser {
         boolean bold = glyph.font.toLowerCase().contains("bold") || glyph.font.toLowerCase().contains("black");
         boolean italic = glyph.font.toLowerCase().contains("italic") || glyph.font.toLowerCase().contains("oblique");
         if (current == null || Math.abs(current.size - glyph.size) > .5
-            || current.bold != bold || current.italic != italic
-            || !current.font.equals(glyph.font)) {
+            || current.bold != bold || current.italic != italic || !current.font.equals(glyph.font)) {
           current = new Span(glyph.text, glyph.size, glyph.font, bold, italic, glyph.x, glyph.y,
               glyph.width, glyph.height);
           spans.add(current.toTextSpan());
@@ -62,9 +72,61 @@ public class PdfPageParser {
       boolean heading = averageSize >= 13 || (line.textLength() <= 48 && spans.stream().anyMatch(TextSpan::bold));
       blocks.add(new TextBlock(new BoundingBox(minX, minY, maxX - minX, maxY - minY), spans, heading));
     }
-    blocks.sort(Comparator.comparingDouble((TextBlock b) -> b.bounds().y())
+
+    ImageExtractor extractor = new ImageExtractor(width, height);
+    extractor.processPage(page);
+    blocks.addAll(extractor.images());
+
+    blocks.sort(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
         .thenComparingDouble(b -> b.bounds().x()));
     return new PageModel(pageNumber, width, height, List.copyOf(blocks));
+  }
+
+  private static final class ImageExtractor extends PDFStreamEngine {
+    private final double pageWidth;
+    private final double pageHeight;
+    private final List<ImageBlock> images = new ArrayList<>();
+
+    ImageExtractor(double pageWidth, double pageHeight) throws IOException {
+      super();
+      this.pageWidth = pageWidth;
+      this.pageHeight = pageHeight;
+      addOperator(new DrawObject());
+    }
+
+    @Override
+    protected void processOperator(org.apache.pdfbox.contentstream.operator.Operator operator,
+                                   List<org.apache.pdfbox.cos.COSBase> operands) throws IOException {
+      if (COSName.DRAW_OBJECT.getName().equals(operator.getName()) && !operands.isEmpty()
+          && operands.get(0) instanceof COSName name) {
+        PDXObject xObject = getResources().getXObject(name);
+        if (xObject instanceof PDImageXObject image) addImage(image);
+      }
+      super.processOperator(operator, operands);
+    }
+
+    private void addImage(PDImageXObject image) throws IOException {
+      Matrix matrix = getGraphicsState().getCurrentTransformationMatrix();
+      float[] p0 = matrix.transformPoint(0, 0);
+      float[] p1 = matrix.transformPoint(1, 0);
+      float[] p2 = matrix.transformPoint(0, 1);
+      float[] p3 = matrix.transformPoint(1, 1);
+      double minX = Math.max(0, Math.min(Math.min(p0[0], p1[0]), Math.min(p2[0], p3[0])));
+      double maxX = Math.min(pageWidth, Math.max(Math.max(p0[0], p1[0]), Math.max(p2[0], p3[0])));
+      double minPdfY = Math.max(0, Math.min(Math.min(p0[1], p1[1]), Math.min(p2[1], p3[1])));
+      double maxPdfY = Math.min(pageHeight, Math.max(Math.max(p0[1], p1[1]), Math.max(p2[1], p3[1])));
+      double y = pageHeight - maxPdfY;
+      double w = maxX - minX;
+      double h = maxPdfY - minPdfY;
+      if (w < 2 || h < 2) return;
+
+      BufferedImage buffered = image.getImage();
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      ImageIO.write(buffered, "png", out);
+      images.add(new ImageBlock(new BoundingBox(minX, y, w, h), "image/png", out.toByteArray()));
+    }
+
+    List<ImageBlock> images() { return List.copyOf(images); }
   }
 
   private static final class PositionStripper extends PDFTextStripper {
