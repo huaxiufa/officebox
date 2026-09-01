@@ -45,7 +45,7 @@ public class PdfPageParser {
         } else {
           int last = spans.size() - 1;
           TextSpan previous = spans.get(last);
-          spans.set(last, new TextSpan(previous.text() + glyph.text(),
+          spans.set(last, new TextSpan(previous.text() + glyph.text,
               new BoundingBox(previous.bounds().x(), previous.bounds().y(),
                   Math.max(previous.bounds().width(), glyph.x + glyph.width - previous.bounds().x()),
                   Math.max(previous.bounds().height(), glyph.y + glyph.height - previous.bounds().y())),
