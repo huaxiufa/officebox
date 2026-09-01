@@ -89,7 +89,6 @@ public class PdfToWordService {
             if (l.x < split) left.add(l); else right.add(l);
         }
         boolean twoColumns = !left.isEmpty() && !right.isEmpty() && split > 0 && split < pageWidth;
-
         if (!twoColumns) {
             for (Line l : lines) addLine(docx, l);
             return;
@@ -97,13 +96,11 @@ public class PdfToWordService {
 
         XWPFTable table = docx.createTable(1, 2);
         table.setWidth("100%");
-        table.getCTTbl().getTblPr().getTblW().setW(12240);
         XWPFTableCell lc = table.getRow(0).getCell(0);
         XWPFTableCell rc = table.getRow(0).getCell(1);
         lc.setWidth("34%"); rc.setWidth("66%");
         lc.setColor("EFF6FB");
         clearCell(lc); clearCell(rc);
-
         if (firstPage) addEmbeddedImages(lc, page);
         for (Line l : left) addLine(lc, l);
         for (Line l : right) addLine(rc, l);
@@ -124,17 +121,10 @@ public class PdfToWordService {
         return bestGap >= 55 ? split : pageWidth;
     }
 
-    private static void addLine(XWPFDocument docx, Line line) {
-        addLine(docx.createParagraph(), line);
-    }
-
-    private static void addLine(XWPFTableCell cell, Line line) {
-        addLine(cell.addParagraph(), line);
-    }
-
+    private static void addLine(XWPFDocument docx, Line line) { addLine(docx.createParagraph(), line); }
+    private static void addLine(XWPFTableCell cell, Line line) { addLine(cell.addParagraph(), line); }
     private static void addLine(XWPFParagraph p, Line line) {
         p.setSpacingBefore(0); p.setSpacingAfter(line.heading ? 3 : 1);
-        if (line.heading) p.setAlignment(ParagraphAlignment.LEFT);
         for (Span s : line.spans) {
             XWPFRun r = p.createRun(); r.setText(s.text);
             r.setFontSize((float)Math.max(7, Math.min(24, s.size)));
@@ -162,10 +152,8 @@ public class PdfToWordService {
     }
 
     private static int twips(double pt) { return (int)Math.max(0, Math.min(Integer.MAX_VALUE, Math.round(pt * 20))); }
-
     private static ResponseEntity<byte[]> error(String message) {
-        return ResponseEntity.internalServerError().contentType(MediaType.TEXT_PLAIN)
-                .body(message.getBytes(StandardCharsets.UTF_8));
+        return ResponseEntity.internalServerError().contentType(MediaType.TEXT_PLAIN).body(message.getBytes(StandardCharsets.UTF_8));
     }
 
     private static final class PositionStripper extends PDFTextStripper {
@@ -189,9 +177,7 @@ public class PdfToWordService {
                 }
                 if(target==null){target=new Line(g.y,g.x);out.add(target);} target.glyphs.add(g); target.x=Math.min(target.x,g.x);
             }
-            out.sort(Comparator.comparingDouble(l->l.y));
-            for(Line l:out)l.finish();
-            return out;
+            out.sort(Comparator.comparingDouble(l->l.y)); for(Line l:out)l.finish(); return out;
         }
     }
     private static final class Glyph { final String text,font; final double x,y,size; Glyph(String t,double x,double y,double s,String f){text=t;this.x=x;this.y=y;size=s;font=f;} }
@@ -202,7 +188,8 @@ public class PdfToWordService {
             glyphs.sort(Comparator.comparingDouble(g->g.x)); Span cur=null;
             for(Glyph g:glyphs){boolean b=g.font.toLowerCase().contains("bold")||g.font.toLowerCase().contains("black"); boolean it=g.font.toLowerCase().contains("italic")||g.font.toLowerCase().contains("oblique");
                 if(cur==null||Math.abs(cur.size-g.size)>.5||cur.bold!=b||cur.italic!=it){cur=new Span(g.text,g.size,b,it);spans.add(cur);}else cur.text+=g.text;}
-            double avg=spans.stream().mapToDouble(s->s.size).average().orElse(10); heading=avg>=13 || spans.stream().mapToInt(s->s.text.length()).sum()<=28 && spans.stream().anyMatch(s->s.bold);
+            double avg=spans.stream().mapToDouble(s->s.size).average().orElse(10);
+            heading=avg>=13 || (spans.stream().mapToInt(s->s.text.length()).sum()<=28 && spans.stream().anyMatch(s->s.bold));
         }
     }
     private static final class Span { String text; final double size; final boolean bold,italic; Span(String t,double s,boolean b,boolean i){text=t;size=s;bold=b;italic=i;} }
