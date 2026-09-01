@@ -3,6 +3,7 @@ package com.officebox.controller;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.xwpf.usermodel.BreakType;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.springframework.http.MediaType;
@@ -17,7 +18,6 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/pdf")
@@ -50,26 +50,29 @@ public class PdfToWordController {
                         String text = stripper.getText(pdf);
                         if (text != null && !text.isBlank()) hasText = true;
 
-                        // Build an editable Word document from the PDF text layer instead of
-                        // asking LibreOffice to convert the PDF as a Draw canvas.
-                        String[] lines = text == null ? new String[0] : text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+                        String[] lines = text == null
+                                ? new String[0]
+                                : text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
                         for (String line : lines) {
                             XWPFParagraph paragraph = docx.createParagraph();
                             paragraph.setSpacingAfter(0);
                             paragraph.createRun().setText(line);
                         }
+
                         if (page < pdf.getNumberOfPages()) {
-                            XWPFParagraph break = docx.createParagraph();
-                            break.createRun().addBreak(org.apache.poi.xwpf.usermodel.BreakType.PAGE);
+                            XWPFParagraph pageBreak = docx.createParagraph();
+                            pageBreak.createRun().addBreak(BreakType.PAGE);
                         }
                     }
 
-                    // A PDF with no text layer needs OCR; don't silently return an empty DOCX.
-                    if (!hasText) return error("PDF 没有可提取的文字层，请使用可搜索文字的 PDF；扫描版 PDF 将在下一版启用 OCR 转换");
+                    if (!hasText) {
+                        return error("PDF 没有可提取的文字层，请使用可搜索文字的 PDF；扫描版 PDF 暂不支持文字识别");
+                    }
 
                     ByteArrayOutputStream out = new ByteArrayOutputStream();
                     docx.write(out);
-                    return ResponseEntity.ok().contentType(MediaType.parseMediaType(DOCX_TYPE))
+                    return ResponseEntity.ok()
+                            .contentType(MediaType.parseMediaType(DOCX_TYPE))
                             .header("Content-Disposition", "attachment; filename=\"document.docx\"")
                             .body(out.toByteArray());
                 }
@@ -82,7 +85,8 @@ public class PdfToWordController {
     }
 
     private static ResponseEntity<byte[]> error(String message) {
-        return ResponseEntity.internalServerError().contentType(MediaType.TEXT_PLAIN)
+        return ResponseEntity.internalServerError()
+                .contentType(MediaType.TEXT_PLAIN)
                 .body(message.getBytes(StandardCharsets.UTF_8));
     }
 }
