@@ -5,10 +5,10 @@ import com.officebox.common.conversion.model.TextBlock;
 import com.officebox.common.conversion.model.TextSpan;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
@@ -18,19 +18,18 @@ import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
 
 /** Renders the intermediate PDF model as editable DOCX content. */
 public class DocxRenderer {
-  private static final double PT_PER_TWIP = 1.0 / 20.0;
-
   public Path render(List<PageModel> pages, Path output) throws IOException {
     if (pages == null || pages.isEmpty()) {
       throw new IOException("No PDF pages to render");
     }
-    Files.createDirectories(output.toAbsolutePath().normalize().getParent());
+    Path parent = output.toAbsolutePath().normalize().getParent();
+    if (parent != null) Files.createDirectories(parent);
     try (XWPFDocument document = new XWPFDocument()) {
       for (int i = 0; i < pages.size(); i++) {
         renderPage(document, pages.get(i));
         if (i + 1 < pages.size()) {
-          document.createParagraph().createRun().addBreak();
-          document.createParagraph().getRuns().get(0).addBreak();
+          XWPFParagraph pageBreak = document.createParagraph();
+          pageBreak.setPageBreak(true);
         }
       }
       try (OutputStream stream = Files.newOutputStream(output)) {
@@ -45,23 +44,20 @@ public class DocxRenderer {
         ? document.getDocument().getBody().getSectPr()
         : document.getDocument().getBody().addNewSectPr();
     CTPageSz pageSize = section.isSetPgSz() ? section.getPgSz() : section.addNewPgSz();
-    pageSize.setW(toTwips(page.width()));
-    pageSize.setH(toTwips(page.height()));
+    pageSize.setW(BigInteger.valueOf(toTwips(page.width())));
+    pageSize.setH(BigInteger.valueOf(toTwips(page.height())));
     CTPageMar margins = section.isSetPgMar() ? section.getPgMar() : section.addNewPgMar();
-    margins.setTop(0);
-    margins.setBottom(0);
-    margins.setLeft(0);
-    margins.setRight(0);
+    margins.setTop(BigInteger.ZERO);
+    margins.setBottom(BigInteger.ZERO);
+    margins.setLeft(BigInteger.ZERO);
+    margins.setRight(BigInteger.ZERO);
 
     double previousBottom = 0;
     for (TextBlock block : page.blocks()) {
       XWPFParagraph paragraph = document.createParagraph();
       double gap = Math.max(0, block.bounds().y() - previousBottom);
-      if (gap > 0) {
-        paragraph.setSpacingBefore((int) Math.round(gap * 20));
-      }
+      if (gap > 0) paragraph.setSpacingBefore((int) Math.round(gap));
       paragraph.setSpacingAfter(0);
-      paragraph.setAlignment(ParagraphAlignment.LEFT);
       for (TextSpan span : block.spans()) {
         XWPFRun run = paragraph.createRun();
         run.setText(span.text());
@@ -79,7 +75,7 @@ public class DocxRenderer {
   }
 
   private static int toTwips(double points) {
-    return (int) Math.round(points / PT_PER_TWIP);
+    return (int) Math.round(points * 20.0);
   }
 
   private static String normalizeFont(String font) {
