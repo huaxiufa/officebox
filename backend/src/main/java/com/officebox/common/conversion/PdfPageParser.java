@@ -26,8 +26,10 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.apache.pdfbox.util.Matrix;
+import org.springframework.stereotype.Component;
 
 /** Extracts PDF text and raster artwork into a coordinate-aware intermediate representation. */
+@Component
 public class PdfPageParser {
   private static final float ARTWORK_DPI = 144f;
 
