@@ -1,5 +1,6 @@
 package com.officebox.common.conversion;
 
+import com.officebox.common.conversion.model.PageBlock;
 import com.officebox.common.conversion.model.PageModel;
 import com.officebox.common.conversion.model.TextBlock;
 import com.officebox.common.conversion.model.TextSpan;
@@ -53,7 +54,8 @@ public class DocxRenderer {
     margins.setRight(BigInteger.ZERO);
 
     double previousBottom = 0;
-    for (TextBlock block : page.blocks()) {
+    for (PageBlock pageBlock : page.blocks()) {
+      if (!(pageBlock instanceof TextBlock block)) continue;
       XWPFParagraph paragraph = document.createParagraph();
       double gap = Math.max(0, block.bounds().y() - previousBottom);
       if (gap > 0) paragraph.setSpacingBefore((int) Math.round(gap));
