@@ -152,8 +152,8 @@ public class PdfToWordController {
     private static void addHeader(XWPFDocument docx, List<Line> lines, PDPage page) throws Exception {
         XWPFTable table = docx.createTable(1, 2);
         table.setWidth("100%");
-        XWPFTableCell photoCell = table.getCell(0, 0);
-        XWPFTableCell infoCell = table.getCell(0, 1);
+        XWPFTableCell photoCell = table.getRow(0).getCell(0);
+        XWPFTableCell infoCell = table.getRow(0).getCell(1);
         photoCell.setColor("EFF6FB");
         infoCell.setColor("EFF6FB");
 
@@ -190,7 +190,6 @@ public class PdfToWordController {
             }
         }
 
-        // Remove default empty paragraph left by the table cell before the generated header content.
         if (infoCell.getParagraphs().size() > 1 && infoCell.getParagraphs().get(0).getText().isEmpty() && images.logo == null) {
             infoCell.removeParagraph(0);
         }
