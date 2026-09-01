@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.stream.Stream;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -36,7 +36,7 @@ class PdfPageParserTest {
         document.save(pdf.toFile());
       }
 
-      try (PDDocument document = PDDocument.load(pdf.toFile())) {
+      try (PDDocument document = Loader.loadPDF(pdf.toFile())) {
         var model = new PdfPageParser().parse(document, 1);
         assertEquals(1, model.pageNumber());
         assertEquals(2, model.blocks().size());
