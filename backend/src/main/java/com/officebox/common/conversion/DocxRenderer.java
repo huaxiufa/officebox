@@ -65,9 +65,22 @@ public class DocxRenderer {
         .toList();
     if (textBlocks.isEmpty() && page.blocks().stream().noneMatch(ImageBlock.class::isInstance)) return;
 
+    // A full-page raster is a visual fallback for image-only pages. When editable text exists,
+    // rendering that raster as an ordinary inline image would consume the page and duplicate
+    // the PDF behind the text. Only retain selective/native images on text-bearing pages.
+    List<PageBlock> renderBlocks = page.blocks();
+    if (!textBlocks.isEmpty()) {
+      renderBlocks = page.blocks().stream()
+          .filter(block -> !(block instanceof ImageBlock image
+              && image.bounds().x() <= 0.5 && image.bounds().y() <= 0.5
+              && image.bounds().width() >= page.width() * .95
+              && image.bounds().height() >= page.height() * .95))
+          .toList();
+    }
+
     ColumnLayout columns = detectColumns(textBlocks, page.width());
-    if (columns.twoColumns) renderTwoColumns(document, page.blocks(), columns.split, page.width());
-    else renderSingleColumn(document, page.blocks());
+    if (columns.twoColumns) renderTwoColumns(document, renderBlocks, columns.split, page.width());
+    else renderSingleColumn(document, renderBlocks);
   }
 
   private void renderSingleColumn(XWPFDocument document, List<PageBlock> blocks) {
