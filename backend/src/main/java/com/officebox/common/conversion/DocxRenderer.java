@@ -129,9 +129,13 @@ public class DocxRenderer {
       if (span.red()!=0 || span.green()!=0 || span.blue()!=0) run.setColor(String.format("%02X%02X%02X",span.red(),span.green(),span.blue())); }
   }
   private static ColumnLayout detectColumns(List<TextBlock> blocks, double pageWidth) {
-    if (blocks.size()<6) return new ColumnLayout(false,pageWidth); List<Double> xs=blocks.stream().map(b->b.bounds().x()).sorted().toList();
-    double bestGap=0,split=pageWidth; for(int i=1;i<xs.size();i++){double a=xs.get(i-1),b=xs.get(i),gap=b-a;if(a>pageWidth*.12&&b<pageWidth*.88&&gap>bestGap){bestGap=gap;split=(a+b)/2;}}
-    boolean two=bestGap>=Math.max(28,pageWidth*.08); if(two){long left=blocks.stream().filter(b->b.bounds().x()<split).count(); two=left>=2&&blocks.size()-left>=2;} return new ColumnLayout(two,split);
+    if (blocks.size()<6) return new ColumnLayout(false,pageWidth);
+    List<Double> xs=blocks.stream().map(b->b.bounds().x()).sorted().toList();
+    double bestGap=0,split=pageWidth;
+    for(int i=1;i<xs.size();i++){double a=xs.get(i-1),b=xs.get(i),gap=b-a;if(a>pageWidth*.12&&b<pageWidth*.88&&gap>bestGap){bestGap=gap;split=(a+b)/2;}}
+    boolean two=bestGap>=Math.max(28,pageWidth*.08);
+    if(two){long left=0; for(TextBlock block:blocks) if(block.bounds().x()<split) left++; two=left>=2&&blocks.size()-left>=2;}
+    return new ColumnLayout(two,split);
   }
   private static List<PageBlock> sorted(List<PageBlock> blocks){return blocks.stream().sorted(Comparator.comparingDouble((PageBlock b)->b.bounds().y()).thenComparingDouble(b->b.bounds().x())).toList();}
   private static void clearCell(XWPFTableCell cell){while(!cell.getParagraphs().isEmpty())cell.removeParagraph(0);} private static void setCellWidth(XWPFTableCell cell,double points){cell.setWidth(String.format("%.0fpt",Math.max(1,points)));}
