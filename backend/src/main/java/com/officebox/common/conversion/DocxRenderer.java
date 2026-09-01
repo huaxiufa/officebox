@@ -1,9 +1,11 @@
 package com.officebox.common.conversion;
 
+import com.officebox.common.conversion.model.ImageBlock;
 import com.officebox.common.conversion.model.PageBlock;
 import com.officebox.common.conversion.model.PageModel;
 import com.officebox.common.conversion.model.TextBlock;
 import com.officebox.common.conversion.model.TextSpan;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigInteger;
@@ -12,6 +14,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import org.apache.poi.util.Units;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
@@ -19,6 +22,7 @@ import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
+import org.apache.poi.xwpf.usermodel.Document;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
@@ -56,30 +60,38 @@ public class DocxRenderer {
     margins.setTop(BigInteger.ZERO); margins.setBottom(BigInteger.ZERO);
     margins.setLeft(BigInteger.ZERO); margins.setRight(BigInteger.ZERO);
 
-    List<TextBlock> blocks = page.blocks().stream()
+    List<TextBlock> textBlocks = page.blocks().stream()
         .filter(TextBlock.class::isInstance).map(TextBlock.class::cast)
         .sorted(Comparator.comparingDouble((TextBlock b) -> b.bounds().y()).thenComparingDouble(b -> b.bounds().x()))
         .toList();
-    if (blocks.isEmpty()) return;
+    if (textBlocks.isEmpty() && page.blocks().stream().noneMatch(ImageBlock.class::isInstance)) return;
 
-    ColumnLayout columns = detectColumns(blocks, page.width());
-    if (columns.twoColumns) renderTwoColumns(document, blocks, columns.split, page.width());
-    else renderSingleColumn(document, blocks, page.width());
+    ColumnLayout columns = detectColumns(textBlocks, page.width());
+    if (columns.twoColumns) renderTwoColumns(document, page.blocks(), columns.split, page.width());
+    else renderSingleColumn(document, page.blocks(), page.width());
   }
 
-  private void renderSingleColumn(XWPFDocument document, List<TextBlock> blocks, double pageWidth) {
+  private void renderSingleColumn(XWPFDocument document, List<PageBlock> blocks, double pageWidth) {
     double previousBottom = 0;
-    for (TextBlock block : blocks) {
+    for (PageBlock block : blocks.stream().sorted(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
+        .thenComparingDouble(b -> b.bounds().x())).toList()) {
       XWPFParagraph paragraph = document.createParagraph();
-      configureParagraph(paragraph, block, pageWidth, previousBottom);
-      writeSpans(paragraph, block.spans());
+      double yGap = Math.max(0, block.bounds().y() - previousBottom);
+      paragraph.setSpacingBefore((int) Math.round(yGap));
+      paragraph.setSpacingAfter(0);
+      paragraph.setIndentationLeft((int) Math.round(Math.max(0, block.bounds().x())));
+      if (block instanceof TextBlock text) {
+        writeSpans(paragraph, text.spans());
+      } else if (block instanceof ImageBlock image) {
+        writeImage(paragraph, image);
+      }
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
     }
   }
 
-  private void renderTwoColumns(XWPFDocument document, List<TextBlock> blocks, double split, double pageWidth) {
-    List<TextBlock> left = new ArrayList<>(), right = new ArrayList<>();
-    for (TextBlock block : blocks) {
+  private void renderTwoColumns(XWPFDocument document, List<PageBlock> blocks, double split, double pageWidth) {
+    List<PageBlock> left = new ArrayList<>(), right = new ArrayList<>();
+    for (PageBlock block : blocks) {
       double center = block.bounds().x() + block.bounds().width() / 2.0;
       if (center < split) left.add(block); else right.add(block);
     }
@@ -93,27 +105,34 @@ public class DocxRenderer {
     XWPFTableCell leftCell = row.getCell(0), rightCell = row.getCell(1);
     setCellWidth(leftCell, split); setCellWidth(rightCell, pageWidth - split);
     clearCell(leftCell); clearCell(rightCell);
-    renderCell(leftCell, left, 0);
-    renderCell(rightCell, right, split);
+    renderCell(leftCell, left, 0); renderCell(rightCell, right, split);
   }
 
-  private void renderCell(XWPFTableCell cell, List<TextBlock> blocks, double originX) {
+  private void renderCell(XWPFTableCell cell, List<PageBlock> blocks, double originX) {
     double previousBottom = 0;
-    for (TextBlock block : blocks) {
+    for (PageBlock block : blocks.stream().sorted(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
+        .thenComparingDouble(b -> b.bounds().x())).toList()) {
       XWPFParagraph paragraph = cell.addParagraph();
       double yGap = Math.max(0, block.bounds().y() - previousBottom);
       paragraph.setSpacingBefore((int) Math.round(yGap));
       paragraph.setSpacingAfter(0);
       paragraph.setIndentationLeft((int) Math.round(Math.max(0, block.bounds().x() - originX)));
-      writeSpans(paragraph, block.spans());
+      if (block instanceof TextBlock text) writeSpans(paragraph, text.spans());
+      else if (block instanceof ImageBlock image) writeImage(paragraph, image);
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
     }
   }
 
-  private static void configureParagraph(XWPFParagraph paragraph, TextBlock block, double pageWidth, double previousBottom) {
-    paragraph.setSpacingBefore((int) Math.round(Math.max(0, block.bounds().y() - previousBottom)));
-    paragraph.setSpacingAfter(0);
-    paragraph.setIndentationLeft((int) Math.round(Math.max(0, block.bounds().x())));
+  private static void writeImage(XWPFParagraph paragraph, ImageBlock image) {
+    try {
+      XWPFRun run = paragraph.createRun();
+      int width = Math.max(1, Units.toEMU(image.bounds().width()));
+      int height = Math.max(1, Units.toEMU(image.bounds().height()));
+      run.addPicture(new ByteArrayInputStream(image.data()), Document.PICTURE_TYPE_PNG,
+          "pdf-image.png", width, height);
+    } catch (Exception e) {
+      throw new IllegalStateException("Unable to embed PDF image", e);
+    }
   }
 
   private static void writeSpans(XWPFParagraph paragraph, List<TextSpan> spans) {
