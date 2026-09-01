@@ -26,10 +26,8 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.apache.pdfbox.util.Matrix;
-import org.springframework.stereotype.Component;
 
 /** Extracts PDF text and raster artwork into a coordinate-aware intermediate representation. */
-@Component
 public class PdfPageParser {
   private static final float ARTWORK_DPI = 144f;
 
@@ -78,15 +76,17 @@ public class PdfPageParser {
       blocks.add(new TextBlock(new BoundingBox(minX, minY, maxX - minX, maxY - minY), spans, heading));
     }
 
-    // Keep a page artwork fallback for pages whose appearance is primarily vector paint.
-    blocks.add(renderPageArtwork(document, pageNumber, width, height));
-
-    // Also retain native raster images separately. The renderer removes the full-page fallback
-    // on text-bearing pages, so these extracted images can survive as individual editable-page
-    // assets (logos, portraits, signatures, embedded photos) instead of being lost entirely.
+    // Preserve native raster images with their PDF coordinates. This is important for photos,
+    // logos and signatures, while keeping the text layer editable.
     ImageExtractor extractor = new ImageExtractor(width, height);
     extractor.processPage(page);
     blocks.addAll(extractor.images());
+
+    // A page with no extractable content is most safely represented by a visual fallback.
+    // Text-bearing pages intentionally avoid this full-page image so it cannot cover editable text.
+    if (blocks.isEmpty()) {
+      blocks.add(renderPageArtwork(document, pageNumber, width, height));
+    }
 
     blocks.sort(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
         .thenComparingDouble(b -> b.bounds().x()));
