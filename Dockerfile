@@ -15,10 +15,14 @@ RUN mvn -f backend/pom.xml package -DskipTests -B
 
 FROM eclipse-temurin:21-jre-jammy
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libreoffice ghostscript poppler-utils curl tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
+    && apt-get install -y --no-install-recommends libreoffice ghostscript poppler-utils curl python3 python3-venv \
+        tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
+    && python3 -m venv /opt/pdf2docx-venv \
+    && /opt/pdf2docx-venv/bin/pip install --no-cache-dir --disable-pip-version-check pdf2docx \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend-build /app/backend/target/*.jar /app/officebox.jar
+COPY --from=backend-build /app/backend/src/main/resources/tools/pdf2docx_bridge.py /app/pdf2docx_bridge.py
 RUN mkdir -p /app/data /tmp/officebox \
     && useradd --create-home --uid 10001 officebox \
     && chown -R officebox:officebox /app /tmp/officebox
