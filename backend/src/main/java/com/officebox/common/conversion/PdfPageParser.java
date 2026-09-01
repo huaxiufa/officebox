@@ -20,14 +20,18 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.apache.pdfbox.util.Matrix;
 import org.springframework.stereotype.Component;
 
-/** Extracts PDF text and raster images into a coordinate-aware intermediate representation. */
+/** Extracts PDF text and raster artwork into a coordinate-aware intermediate representation. */
 @Component
 public class PdfPageParser {
+  private static final float ARTWORK_DPI = 144f;
+
   public PageModel parse(PDDocument document, int pageNumber) throws IOException {
     PDPage page = document.getPage(pageNumber - 1);
     double width = page.getMediaBox().getWidth();
@@ -73,13 +77,28 @@ public class PdfPageParser {
       blocks.add(new TextBlock(new BoundingBox(minX, minY, maxX - minX, maxY - minY), spans, heading));
     }
 
+    // Keep the page artwork itself. This preserves vector backgrounds, logos, shapes and
+    // other paint operations that cannot be represented faithfully by ordinary DOCX runs.
+    // The renderer can use this image as a visual fallback while the extracted text remains editable.
+    blocks.add(renderPageArtwork(document, pageNumber, width, height));
+
     ImageExtractor extractor = new ImageExtractor(width, height);
     extractor.processPage(page);
-    blocks.addAll(extractor.images());
+    // Extracted images are retained for future selective/high-resolution placement. Do not add
+    // them here when a full-page artwork image is present, otherwise logos/backgrounds are doubled.
 
     blocks.sort(Comparator.comparingDouble((PageBlock b) -> b.bounds().y())
         .thenComparingDouble(b -> b.bounds().x()));
     return new PageModel(pageNumber, width, height, List.copyOf(blocks));
+  }
+
+  private static ImageBlock renderPageArtwork(PDDocument document, int pageNumber, double width, double height)
+      throws IOException {
+    PDFRenderer renderer = new PDFRenderer(document);
+    BufferedImage image = renderer.renderImageWithDPI(pageNumber - 1, ARTWORK_DPI, ImageType.RGB);
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    ImageIO.write(image, "png", out);
+    return new ImageBlock(new BoundingBox(0, 0, width, height), "image/png", out.toByteArray());
   }
 
   private static final class ImageExtractor extends PDFStreamEngine {
@@ -119,23 +138,17 @@ public class PdfPageParser {
       double w = maxX - minX;
       double h = maxPdfY - minPdfY;
       if (w < 2 || h < 2) return;
-
       BufferedImage buffered = image.getImage();
       String suffix = image.getSuffix();
       String format = "png";
       String mime = "image/png";
-      if ("jpg".equalsIgnoreCase(suffix) || "jpeg".equalsIgnoreCase(suffix)) {
-        format = "jpg"; mime = "image/jpeg";
-      } else if ("gif".equalsIgnoreCase(suffix)) {
-        format = "gif"; mime = "image/gif";
-      } else if ("bmp".equalsIgnoreCase(suffix)) {
-        format = "bmp"; mime = "image/bmp";
-      }
+      if ("jpg".equalsIgnoreCase(suffix) || "jpeg".equalsIgnoreCase(suffix)) { format = "jpg"; mime = "image/jpeg"; }
+      else if ("gif".equalsIgnoreCase(suffix)) { format = "gif"; mime = "image/gif"; }
+      else if ("bmp".equalsIgnoreCase(suffix)) { format = "bmp"; mime = "image/bmp"; }
       ByteArrayOutputStream out = new ByteArrayOutputStream();
       ImageIO.write(buffered, format, out);
       images.add(new ImageBlock(new BoundingBox(minX, y, w, h), mime, out.toByteArray()));
     }
-
     List<ImageBlock> images() { return List.copyOf(images); }
   }
 
@@ -146,8 +159,8 @@ public class PdfPageParser {
       for (TextPosition p : positions) {
         String value = p.getUnicode();
         if (value == null || value.isEmpty()) continue;
-        glyphs.add(new Glyph(value, p.getXDirAdj(), p.getYDirAdj(), p.getWidthDirAdj(),
-            p.getHeightDir(), p.getFontSizeInPt(), p.getFont() == null ? "" : p.getFont().getName()));
+        glyphs.add(new Glyph(value, p.getXDirAdj(), p.getYDirAdj(), p.getWidthDirAdj(), p.getHeightDir(),
+            p.getFontSizeInPt(), p.getFont() == null ? "" : p.getFont().getName()));
       }
     }
     List<Line> lines() {
