@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -19,11 +18,7 @@ public class PdfToWordService {
   private final PdfPageParser pageParser;
   private final DocxRenderer renderer;
 
-  public PdfToWordService(PdfPageParser pageParser) {
-    this(pageParser, new DocxRenderer());
-  }
-
-  PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer) {
+  public PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer) {
     this.pageParser = pageParser;
     this.renderer = renderer;
   }
