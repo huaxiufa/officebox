@@ -58,12 +58,12 @@ public class PdfToWordController {
                         paragraph.setSpacingAfter(0);
                         paragraph.setSpacingBefore(0);
                         // Keep the horizontal placement approximately where it was in the PDF.
-                        if (line.x > 1) paragraph.setIndentationLeft(Math.round(line.x));
+                        if (line.x > 1) paragraph.setIndentationLeft((int) Math.round(line.x));
 
                         for (Span span : line.spans) {
                             XWPFRun run = paragraph.createRun();
                             run.setText(span.text);
-                            float size = Math.max(7f, Math.min(48f, span.fontSize));
+                            float size = (float) Math.max(7d, Math.min(48d, span.fontSize));
                             run.setFontSize(size);
                             if (span.bold) run.setBold(true);
                             if (span.italic) run.setItalic(true);
