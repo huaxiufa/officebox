@@ -16,8 +16,10 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
+import org.springframework.stereotype.Component;
 
 /** Renders the intermediate PDF model as editable DOCX content. */
+@Component
 public class DocxRenderer {
   public Path render(List<PageModel> pages, Path output) throws IOException {
     if (pages == null || pages.isEmpty()) {
