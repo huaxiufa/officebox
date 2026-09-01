@@ -121,9 +121,19 @@ public class PdfPageParser {
       if (w < 2 || h < 2) return;
 
       BufferedImage buffered = image.getImage();
+      String suffix = image.getSuffix();
+      String format = "png";
+      String mime = "image/png";
+      if ("jpg".equalsIgnoreCase(suffix) || "jpeg".equalsIgnoreCase(suffix)) {
+        format = "jpg"; mime = "image/jpeg";
+      } else if ("gif".equalsIgnoreCase(suffix)) {
+        format = "gif"; mime = "image/gif";
+      } else if ("bmp".equalsIgnoreCase(suffix)) {
+        format = "bmp"; mime = "image/bmp";
+      }
       ByteArrayOutputStream out = new ByteArrayOutputStream();
-      ImageIO.write(buffered, "png", out);
-      images.add(new ImageBlock(new BoundingBox(minX, y, w, h), "image/png", out.toByteArray()));
+      ImageIO.write(buffered, format, out);
+      images.add(new ImageBlock(new BoundingBox(minX, y, w, h), mime, out.toByteArray()));
     }
 
     List<ImageBlock> images() { return List.copyOf(images); }
