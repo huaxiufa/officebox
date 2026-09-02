@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -47,7 +48,6 @@ HTML_HEAD = r"""
   thead { display: table-header-group; }
   tr { page-break-inside: avoid; break-inside: avoid; }
   img { max-width: 100%; height: auto; }
-  a { color: inherit; text-decoration: none; }
   .profile-photo { float: left; width: 27mm; height: 27mm; margin: 1mm 5mm 2mm 0; border-radius: 50%; }
   .europass-logo { float: right; width: 51mm; height: auto; margin: -2mm 0 1mm 4mm; }
   .officebox-clear { clear: both; height: 0; margin: 0; padding: 0; }
@@ -67,7 +67,7 @@ def _extract_header_images(pdf_path: Path):
     larger image is the Europass logo and may carry a separate PDF soft mask.
     """
     try:
-        import fitz  # PyMuPDF, already pulled by Docling's PDF stack in practice.
+        import fitz
     except Exception:
         return None, None
 
@@ -102,18 +102,8 @@ def _extract_header_images(pdf_path: Path):
 
 def _fix_list_markup(html: str) -> str:
     """Normalize Docling's bullet paragraphs for LibreOffice's HTML importer."""
-    # Docling can emit the bullet as text when a PDF used a visual bullet rather
-    # than a semantic list. Convert those paragraphs into real list items.
     pattern = re.compile(r"<p([^>]*)>\s*•\s*(.*?)\s*</p>", re.I | re.S)
     html = pattern.sub(r'<ul class="docling-list"><li\1>\2</li></ul>', html)
-    # A few PDFs contain several bullets in one text block. Split only on a
-    # bullet that starts after whitespace/punctuation, preserving normal prose.
-    html = re.sub(
-        r"(<p[^>]*>[^<]*?)(?:\s*•\s+)([^<]*</p>)",
-        lambda m: m.group(0),
-        html,
-        flags=re.I | re.S,
-    )
     return html
 
 
@@ -131,14 +121,11 @@ def _decorate_header(html: str, source: Path) -> str:
         return html
 
     marker = "<div class=\"officebox-clear\"></div>"
-    # Put the images before the first heading/title. Floating images naturally
-    # recreate the two-column Europass header while keeping all text editable.
     match = re.search(r"<(?:h1|h2|p)\b", html, re.I)
     if match:
         html = html[:match.start()] + "".join(assets) + html[match.start():]
     else:
         html = "".join(assets) + html
-    # Clear the float before the first major section heading.
     html = re.sub(r"(<h2\b[^>]*>)", marker + r"\1", html, count=1, flags=re.I)
     return html
 
@@ -156,6 +143,13 @@ def main() -> int:
     target.parent.mkdir(parents=True, exist_ok=True)
 
     pipeline_options = PdfPipelineOptions()
+    # OfficeBox runs Docling without a GPU. Explicitly selecting CPU prevents
+    # AUTO from trying to initialize CUDA when a CUDA-enabled PyTorch package
+    # happens to be present in another environment.
+    pipeline_options.accelerator_options = AcceleratorOptions(
+        device=AcceleratorDevice.CPU,
+        num_threads=4,
+    )
     pipeline_options.do_ocr = True
     pipeline_options.ocr_options = TesseractCliOcrOptions(lang=["eng", "chi_sim"])
     pipeline_options.do_table_structure = True
@@ -173,9 +167,6 @@ def main() -> int:
     if result.document.num_pages() == 0:
         raise RuntimeError("Docling parsed zero PDF pages")
 
-    # Do NOT ask Docling for split-page HTML here. LibreOffice should paginate
-    # the editable flow itself; split-page HTML was causing mostly blank pages
-    # and turning a 3-page Europass CV into 5 pages.
     result.document.save_as_html(
         target,
         image_mode=ImageRefMode.EMBEDDED,
