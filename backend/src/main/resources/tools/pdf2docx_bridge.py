@@ -2,9 +2,9 @@
 """Open-source PDF -> DOCX bridge using Artifex pdf2docx.
 
 The bridge keeps the conversion editable and adds a small OfficeBox cleanup
-pass for a common PDF layout artifact: several bullet items being merged into
-one Word paragraph. The cleanup only splits embedded bullet markers; it does
-not rewrite ordinary prose.
+pass for common PDF layout artifacts. Cleanup is deliberately conservative:
+it only changes paragraph boundaries for embedded bullet markers and preserves
+the original run formatting instead of flattening a paragraph to one run.
 """
 import os
 import re
@@ -16,7 +16,7 @@ from docx import Document
 from pdf2docx import Converter
 
 
-BULLET_RE = re.compile(r"(?<!\S)([•●▪◦‣⁃])\s*")
+BULLET_RE = re.compile(r"(?<!\\S)([•●▪◦‣⁃])\\s*")
 
 
 def _float_env(name: str, default: float) -> float:
@@ -26,14 +26,96 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+def _clone_run_slice(run, start: int, end: int):
+    """Clone a run while keeping its formatting and only a text slice."""
+    text = run.text or ""
+    if start >= end or not text:
+        return None
+    clone = deepcopy(run._r)
+    value = text[start:end]
+    text_nodes = [node for node in clone.iter() if node.tag.endswith("}t")]
+    if not text_nodes:
+        return None
+    text_nodes[0].text = value
+    for node in text_nodes[1:]:
+        node.text = ""
+    return clone
+
+
+def _build_split_paragraphs(paragraph, boundaries):
+    """Create paragraphs split at character offsets while preserving runs.
+
+    pdf2docx can put normal prose, a bullet glyph and the following item into
+    one paragraph. The old cleanup rebuilt every new paragraph from the first
+    run, which silently discarded bold/italic/font changes inside the source
+    paragraph. This implementation maps each output range back onto the
+    original runs, so formatting survives the split.
+    """
+    text = paragraph.text
+    ranges = []
+    start = 0
+    for boundary in boundaries:
+        if boundary > start:
+            ranges.append((start, boundary))
+        start = boundary
+    if start < len(text):
+        ranges.append((start, len(text)))
+
+    ranges = [(s, e) for s, e in ranges if text[s:e].strip()]
+    if len(ranges) < 2:
+        return []
+
+    ppr = deepcopy(paragraph._p.pPr) if paragraph._p.pPr is not None else None
+    runs = list(paragraph.runs)
+    output = []
+    cursor = 0
+
+    for range_start, range_end in ranges:
+        new_p = deepcopy(paragraph._p)
+        for child in list(new_p):
+            if child.tag.endswith("}pPr"):
+                continue
+            new_p.remove(child)
+        if ppr is not None:
+            new_p.insert(0, deepcopy(ppr))
+
+        run_cursor = 0
+        for run in runs:
+            run_text = run.text or ""
+            run_start = run_cursor
+            run_end = run_cursor + len(run_text)
+            run_cursor = run_end
+            if run_end <= range_start or run_start >= range_end:
+                continue
+            slice_start = max(range_start, run_start) - run_start
+            slice_end = min(range_end, run_end) - run_start
+            clone = _clone_run_slice(run, slice_start, slice_end)
+            if clone is not None:
+                new_p.append(clone)
+
+        # Preserve a structurally valid paragraph even when the source range
+        # contains only non-text XML elements.
+        if len(new_p) == (1 if ppr is not None else 0):
+            from docx.oxml import OxmlElement
+            run = OxmlElement("w:r")
+            t = OxmlElement("w:t")
+            t.text = text[range_start:range_end].strip()
+            run.append(t)
+            new_p.append(run)
+
+        output.append(new_p)
+        cursor = range_end
+
+    return output
+
+
 def _split_embedded_bullets(path: Path) -> int:
     """Split paragraphs containing multiple embedded bullet items.
 
-    pdf2docx intentionally focuses on layout reconstruction and does not yet
-    expose a full Word list-style reconstruction. Resume PDFs commonly encode
-    bullets as ordinary glyphs, so a paragraph can become ``text.• item``.
-    Turning those embedded markers into real paragraph boundaries is a safe,
-    editable improvement and preserves the text rather than rasterizing it.
+    Only paragraphs that contain an embedded bullet after non-whitespace text
+    are changed. Existing bullet paragraphs remain untouched. Paragraphs with
+    drawings are skipped because moving inline drawing XML without a richer
+    layout model can change image placement.
     """
     doc = Document(str(path))
     changed = 0
@@ -43,62 +125,21 @@ def _split_embedded_bullets(path: Path) -> int:
         matches = list(BULLET_RE.finditer(text))
         if not matches or matches[0].start() == 0:
             continue
-
-        # Only split when a bullet appears after non-whitespace content. This
-        # avoids touching paragraphs that are already clean bullet items.
-        boundaries = [m.start() for m in matches]
-        if not boundaries:
+        if paragraph._p.xpath(".//w:drawing"):
             continue
 
-        parts = []
-        start = 0
-        for boundary in boundaries:
-            if boundary > start:
-                parts.append(text[start:boundary].strip())
-            start = boundary
-        if start < len(text):
-            parts.append(text[start:].strip())
-        parts = [part for part in parts if part]
-        if len(parts) < 2:
+        boundaries = [match.start() for match in matches]
+        new_paragraphs = _build_split_paragraphs(paragraph, boundaries)
+        if len(new_paragraphs) < 2:
             continue
 
         p = paragraph._p
         parent = p.getparent()
         index = parent.index(p)
-        ppr = deepcopy(p.pPr) if p.pPr is not None else None
-        base_run = deepcopy(paragraph.runs[0]._r) if paragraph.runs else None
-
-        for offset, part in enumerate(parts):
-            new_p = deepcopy(p)
-            for child in list(new_p):
-                if child.tag.endswith('}pPr'):
-                    continue
-                new_p.remove(child)
-            if ppr is not None:
-                new_p.insert(0, deepcopy(ppr))
-
-            if base_run is not None:
-                new_run = deepcopy(base_run)
-                text_nodes = [n for n in new_run.iter() if n.tag.endswith('}t')]
-                if text_nodes:
-                    text_nodes[0].text = part
-                    for node in text_nodes[1:]:
-                        node.text = ''
-                new_p.append(new_run)
-            else:
-                # Keep the paragraph structurally valid even if pdf2docx
-                # emitted a textless paragraph.
-                from docx.oxml import OxmlElement
-                run = OxmlElement('w:r')
-                t = OxmlElement('w:t')
-                t.text = part
-                run.append(t)
-                new_p.append(run)
-
+        for offset, new_p in enumerate(new_paragraphs):
             parent.insert(index + offset, new_p)
-
         parent.remove(p)
-        changed += len(parts) - 1
+        changed += len(new_paragraphs) - 1
 
     if changed:
         doc.save(str(path))
