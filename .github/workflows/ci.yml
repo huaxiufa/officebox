@@ -69,7 +69,7 @@ jobs:
               b'<< /Type /Catalog /Pages 2 0 R >>',
               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-              b'<< /Length 58 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj ET\nendstream',
+              b'<< /Length 150 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. ) Tj (bullet one) Tj ( bullet two) Tj ET\nendstream',
               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
           ]
           pdf = bytearray(b'%PDF-1.4\n')
@@ -91,6 +91,23 @@ jobs:
             http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx
           unzip -t /tmp/officebox-smoke.docx
           unzip -p /tmp/officebox-smoke.docx word/document.xml | grep -F 'OfficeBox PDF to Word smoke test'
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          from xml.etree import ElementTree as ET
+
+          ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+          with ZipFile('/tmp/officebox-smoke.docx') as zf:
+              root = ET.fromstring(zf.read('word/document.xml'))
+          paragraphs = []
+          for p in root.findall('.//w:body/w:p', ns):
+              text = ''.join(t.text or '' for t in p.findall('.//w:t', ns))
+              if text:
+                  paragraphs.append(text)
+          assert 'OfficeBox PDF to Word smoke test' in paragraphs
+          assert 'Summary. bullet one' in paragraphs
+          assert 'bullet two' in paragraphs
+          print('PDF->Word paragraph smoke test passed:', paragraphs)
+          PY
       - name: Stop application container
         if: always()
         run: docker rm -f officebox-ci 2>/dev/null || true
