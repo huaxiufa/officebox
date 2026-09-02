@@ -26,23 +26,16 @@ public class PdfToWordService {
     this(pageParser, renderer, new DoclingEngine(), new Pdf2DocxEngine());
   }
 
-  /** Backward-compatible constructor for focused unit tests and callers that only customize parsing. */
   public PdfToWordService(PdfPageParser pageParser) {
     this(pageParser, new DocxRenderer(), new DoclingEngine(), new Pdf2DocxEngine());
   }
 
-  PdfToWordService(
-      PdfPageParser pageParser,
-      DocxRenderer renderer,
-      Pdf2DocxEngine legacyEngine) {
+  PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer, Pdf2DocxEngine legacyEngine) {
     this(pageParser, renderer, new DoclingEngine(), legacyEngine);
   }
 
-  PdfToWordService(
-      PdfPageParser pageParser,
-      DocxRenderer renderer,
-      DoclingEngine doclingEngine,
-      Pdf2DocxEngine legacyEngine) {
+  PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer,
+      DoclingEngine doclingEngine, Pdf2DocxEngine legacyEngine) {
     this.pageParser = pageParser;
     this.renderer = renderer;
     this.doclingEngine = doclingEngine;
@@ -59,10 +52,6 @@ public class PdfToWordService {
     Path result = outputRoot.resolve(base + ".docx").normalize();
     if (!result.startsWith(outputRoot)) throw new IOException("Invalid output path");
 
-    // Docling is the default PDF engine. It performs layout-aware document
-    // understanding and emits structured HTML, which LibreOffice converts to
-    // an editable DOCX. The older pdf2docx bridge remains a fallback so that
-    // deployments can still convert documents if Docling is unavailable.
     if (doclingEngine.isAvailable()) {
       progress.accept(new TaskProgress(15, "Analyzing PDF with Docling"));
       try {
@@ -73,11 +62,16 @@ public class PdfToWordService {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         throw new IOException("PDF to DOCX conversion interrupted", e);
+      } catch (IOException | RuntimeException e) {
+        // A malformed PDF, OCR/runtime issue, or a Docling model problem should
+        // not make the whole OfficeBox conversion unavailable. Try the legacy
+        // engine before falling back to the Java renderer.
+        progress.accept(new TaskProgress(18, "Docling failed; trying fallback engine"));
       }
     }
 
     if (legacyEngine.isAvailable()) {
-      progress.accept(new TaskProgress(20, "Falling back to pdf2docx"));
+      progress.accept(new TaskProgress(25, "Falling back to pdf2docx"));
       try {
         if (legacyEngine.convert(input, result)) {
           progress.accept(new TaskProgress(95, "DOCX generated with pdf2docx fallback"));
@@ -86,19 +80,19 @@ public class PdfToWordService {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         throw new IOException("PDF to DOCX conversion interrupted", e);
+      } catch (IOException | RuntimeException e) {
+        progress.accept(new TaskProgress(28, "pdf2docx failed; using Java renderer"));
       }
     }
 
-    // Keep the Java renderer as the final deterministic fallback for environments
-    // that do not have either optional Python engine (notably unit tests).
-    progress.accept(new TaskProgress(20, "Analyzing PDF"));
+    progress.accept(new TaskProgress(30, "Analyzing PDF"));
     List<PageModel> pages = new ArrayList<>();
     try (PDDocument document = Loader.loadPDF(input.toFile())) {
       int total = document.getNumberOfPages();
       if (total == 0) throw new IOException("PDF contains no pages");
       for (int page = 1; page <= total; page++) {
         pages.add(pageParser.parse(document, page));
-        int percent = 20 + (int) Math.round(page * 60.0 / total);
+        int percent = 30 + (int) Math.round(page * 50.0 / total);
         progress.accept(new TaskProgress(percent, "Analyzing PDF page " + page + " of " + total));
       }
     }
