@@ -69,7 +69,7 @@ jobs:
               b'<< /Type /Catalog /Pages 2 0 R >>',
               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-              b'<< /Length 150 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. ) Tj (bullet one) Tj ( bullet two) Tj ET\nendstream',
+              b'<< /Length 170 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. \\267 First item \\267 Second item) Tj ET\nendstream',
               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
           ]
           pdf = bytearray(b'%PDF-1.4\n')
@@ -104,8 +104,9 @@ jobs:
               if text:
                   paragraphs.append(text)
           assert 'OfficeBox PDF to Word smoke test' in paragraphs
-          assert 'Summary. bullet one' in paragraphs
-          assert 'bullet two' in paragraphs
+          assert 'Summary.' in paragraphs
+          assert '• First item' in paragraphs
+          assert '• Second item' in paragraphs
           print('PDF->Word paragraph smoke test passed:', paragraphs)
           PY
       - name: Stop application container
