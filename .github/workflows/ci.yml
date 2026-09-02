@@ -100,7 +100,10 @@ jobs:
           PY
           if ! curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
             http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx; then
-            echo 'PDF->Word endpoint returned an error; container logs:'
+            echo 'PDF->Word endpoint returned an error; response body:'
+            cat /tmp/officebox-smoke.docx 2>/dev/null || true
+            echo
+            echo 'Container logs:'
             docker logs officebox-ci
             exit 1
           fi
