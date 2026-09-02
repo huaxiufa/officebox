@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""OfficeBox PDF -> editable DOCX bridge powered directly by Docling."""
+"""PDF -> DOCX using Docling layout data and positioned editable Word shapes."""
+import html
 import os
 import sys
 from pathlib import Path
 
 from docx import Document
 from docx.enum.section import WD_SECTION
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
@@ -16,6 +16,9 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import ContentLayer
+
+EMU_PER_PT = 12700
+TWIPS_PER_PT = 20
 
 
 def _num(name, default):
@@ -35,103 +38,134 @@ def _page(item):
     return prov[0].page_no if prov else None
 
 
-def _cell_margins(cell):
-    tc_pr = cell._tc.get_or_add_tcPr()
-    mar = OxmlElement("w:tcMar")
-    for side, value in (("top", 45), ("start", 70), ("bottom", 45), ("end", 70)):
-        node = OxmlElement(f"w:{side}")
-        node.set(qn("w:w"), str(value))
-        node.set(qn("w:type"), "dxa")
-        mar.append(node)
-    tc_pr.append(mar)
+def _pt(v):
+    return max(0.1, float(v))
 
 
-def _shade(cell, fill="EDEDED"):
-    tc_pr = cell._tc.get_or_add_tcPr()
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:fill"), fill)
-    tc_pr.append(shd)
+def _text_size(item, box):
+    explicit = getattr(item, "font_size", None)
+    if explicit:
+        return max(6.0, min(72.0, float(explicit)))
+    # Docling's PDF bbox is in points. A glyph box is normally ~0.8 of font size.
+    h = max(1.0, float(box.height))
+    size = h * 1.18
+    label = str(getattr(item, "label", ""))
+    if "title" in label:
+        size *= 1.15
+    elif "section_header" in label:
+        size *= 1.08
+    return max(6.0, min(48.0, size))
 
 
-def _render_text(out, item, page_height, cursor):
-    box = _bbox(item)
-    text = getattr(item, "text", None) or getattr(item, "orig", None) or ""
-    if box is None or not text.strip():
-        return cursor
-    top = page_height - box.b
+def _set_page_layout(section):
+    section.top_margin = Pt(0)
+    section.bottom_margin = Pt(0)
+    section.left_margin = Pt(0)
+    section.right_margin = Pt(0)
+    section.header_distance = Pt(0)
+    section.footer_distance = Pt(0)
+
+
+def _page_anchor_paragraph(out):
     p = out.add_paragraph()
     pf = p.paragraph_format
-    pf.space_before = Pt(max(0, top - cursor))
+    pf.space_before = Pt(0)
     pf.space_after = Pt(0)
-    pf.left_indent = Pt(max(0, box.l))
-    pf.line_spacing = 1.0
-    run = p.add_run(text)
-    label = str(getattr(item, "label", ""))
-    size = 15 if "section_header" in label else 10.5
-    if "title" in label:
-        size = 20
-    run.font.size = Pt(size)
-    run.bold = "section_header" in label or "title" in label
-    if "list_item" in label:
-        p.style = out.styles["List Bullet"]
-    return max(cursor, top + box.height)
+    pf.line_spacing = 1
+    pf.keep_together = True
+    pf.keep_with_next = False
+    return p
 
 
-def _render_table(out, item, page_height, cursor):
-    box = _bbox(item)
-    data = getattr(item, "data", None)
-    if box is None or data is None or not data.num_rows or not data.num_cols:
-        return cursor
-    top = page_height - box.b
-    p = out.add_paragraph()
-    p.paragraph_format.space_before = Pt(max(0, top - cursor))
-    p.paragraph_format.space_after = Pt(0)
-    table = out.add_table(rows=int(data.num_rows), cols=int(data.num_cols))
-    table.style = "Table Grid"
-    table.autofit = False
-    seen = set()
-    for cell in data.table_cells:
-        sr, er = int(cell.start_row_offset_idx), int(cell.end_row_offset_idx)
-        sc, ec = int(cell.start_col_offset_idx), int(cell.end_col_offset_idx)
-        key = (sr, er, sc, ec)
-        if key in seen or sr >= data.num_rows or sc >= data.num_cols:
-            continue
-        seen.add(key)
-        target = table.cell(sr, sc)
-        if er > sr or ec > sc:
-            target = target.merge(table.cell(min(er, data.num_rows) - 1, min(ec, data.num_cols) - 1))
-        target.text = getattr(cell, "text", "") or ""
-        target.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-        _cell_margins(target)
-        if getattr(cell, "column_header", False) or getattr(cell, "row_header", False):
-            _shade(target)
-            for paragraph in target.paragraphs:
-                for run in paragraph.runs:
-                    run.bold = True
-    if table.rows:
-        table.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
-    return max(cursor, top + box.height)
+def _append_vml_textbox(p, x, y, w, h, text, font_size, bold=False, border=False, fill=None):
+    """Add a page-relative VML textbox. Word keeps its text editable."""
+    run = p.add_run()
+    pict = OxmlElement("w:pict")
+    shape = OxmlElement("v:shape")
+    shape.set(qn("style"),
+              "position:absolute;"
+              f"margin-left:{_pt(x):.2f}pt;"
+              f"margin-top:{_pt(y):.2f}pt;"
+              f"width:{_pt(w):.2f}pt;"
+              f"height:{_pt(h):.2f}pt;"
+              "z-index:1;"
+              "mso-position-horizontal-relative:page;"
+              "mso-position-vertical-relative:page;"
+              "mso-wrap-edited:f;")
+    shape.set("type", "#_x0000_t202")
+    shape.set(qn("fillcolor"), fill or "white")
+    shape.set(qn("stroked"), "t" if border else "f")
+    if border:
+        shape.set(qn("strokeweight"), "0.5pt")
+    textbox = OxmlElement("v:textbox")
+    textbox.set("inset", "0,0,0,0")
+    tx = OxmlElement("w:txbxContent")
+    wp = OxmlElement("w:p")
+    wppr = OxmlElement("w:pPr")
+    spacing = OxmlElement("w:spacing")
+    spacing.set(qn("w:before"), "0")
+    spacing.set(qn("w:after"), "0")
+    spacing.set(qn("w:line"), "240")
+    wppr.append(spacing)
+    wp.append(wppr)
+    wr = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    rfonts = OxmlElement("w:rFonts")
+    rfonts.set(qn("w:ascii"), "Arial")
+    rfonts.set(qn("w:hAnsi"), "Arial")
+    rfonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    rpr.append(rfonts)
+    sz = OxmlElement("w:sz")
+    sz.set(qn("w:val"), str(max(2, int(round(font_size * 2)))))
+    rpr.append(sz)
+    if bold:
+        rpr.append(OxmlElement("w:b"))
+    wr.append(rpr)
+    wt = OxmlElement("w:t")
+    wt.set(qn("xml:space"), "preserve")
+    wt.text = text
+    wr.append(wt)
+    wp.append(wr)
+    tx.append(wp)
+    textbox.append(tx)
+    shape.append(textbox)
+    pict.append(shape)
+    run._r.append(pict)
 
 
-def _render_picture(out, item, dl_doc, page_height, cursor, assets):
-    box = _bbox(item)
-    if box is None:
-        return cursor
-    image = item.get_image(dl_doc)
-    if image is None:
-        return cursor
-    top = page_height - box.b
-    p = out.add_paragraph()
-    p.paragraph_format.space_before = Pt(max(0, top - cursor))
-    p.paragraph_format.space_after = Pt(0)
-    p.paragraph_format.left_indent = Pt(max(0, box.l))
-    path = assets / f"{len(list(assets.iterdir()))}.png"
-    image.save(path)
-    p.add_run().add_picture(str(path), width=Pt(max(1, box.width)), height=Pt(max(1, box.height)))
-    return max(cursor, top + box.height)
+def _append_floating_picture(p, image_path, x, y, w, h):
+    """Create a floating DrawingML image anchored to the page."""
+    from docx.shared import Inches
+
+    r = p.add_run()
+    inline = r.add_picture(str(image_path), width=Pt(max(1, w)), height=Pt(max(1, h)))
+    drawing = inline._inline
+    drawing.tag = qn("wp:anchor")
+    anchor = drawing
+    anchor.set("distT", "0")
+    anchor.set("distB", "0")
+    anchor.set("distL", "0")
+    anchor.set("distR", "0")
+    anchor.set("behindDoc", "0")
+    anchor.set("locked", "0")
+    anchor.set("layoutInCell", "1")
+    anchor.set("allowOverlap", "1")
+    pos_h = OxmlElement("wp:positionH")
+    pos_h.set("relativeFrom", "page")
+    off_h = OxmlElement("wp:posOffset")
+    off_h.text = str(int(x * EMU_PER_PT))
+    pos_h.append(off_h)
+    pos_v = OxmlElement("wp:positionV")
+    pos_v.set("relativeFrom", "page")
+    off_v = OxmlElement("wp:posOffset")
+    off_v.text = str(int(y * EMU_PER_PT))
+    pos_v.append(off_v)
+    anchor.insert(0, pos_h)
+    anchor.insert(1, pos_v)
+    return inline
 
 
-def _items(doc):
+def _iter_items(doc):
     try:
         iterator = doc.iterate_items(
             traverse_pictures=False,
@@ -139,14 +173,82 @@ def _items(doc):
         )
     except TypeError:
         iterator = doc.iterate_items(traverse_pictures=False)
-    result = []
     for item, _level in iterator:
         parent = getattr(item, "parent", None)
         cref = getattr(parent, "cref", "") if parent else ""
         if isinstance(cref, str) and cref.startswith("#/tables/"):
             continue
-        result.append(item)
-    return result
+        yield item
+
+
+def _table_cell_bbox(cell, table_box, rows, cols):
+    box = getattr(cell, "bbox", None)
+    if box is not None:
+        return box
+    sr = int(cell.start_row_offset_idx)
+    er = int(cell.end_row_offset_idx)
+    sc = int(cell.start_col_offset_idx)
+    ec = int(cell.end_col_offset_idx)
+    cw = table_box.width / max(1, cols)
+    ch = table_box.height / max(1, rows)
+    class B:
+        pass
+    b = B()
+    b.l = table_box.l + sc * cw
+    b.r = table_box.l + ec * cw
+    b.t = table_box.t + sr * ch
+    b.b = table_box.t + er * ch
+    b.width = b.r - b.l
+    b.height = b.b - b.t
+    return b
+
+
+def _render_table(p, item, page_height):
+    box = _bbox(item)
+    data = getattr(item, "data", None)
+    if box is None or data is None or not data.num_rows or not data.num_cols:
+        return 0
+    count = 0
+    for cell in data.table_cells:
+        cb = _table_cell_bbox(cell, box, int(data.num_rows), int(data.num_cols))
+        text = (getattr(cell, "text", "") or "").strip()
+        if not text:
+            continue
+        y = cb.t
+        size = max(7.0, min(24.0, cb.height * 0.42))
+        _append_vml_textbox(
+            p, cb.l, y, cb.width, max(6, cb.height), text, size,
+            bold=bool(getattr(cell, "column_header", False) or getattr(cell, "row_header", False)),
+            border=True,
+            fill="white",
+        )
+        count += 1
+    return count
+
+
+def _render_text(p, item, page_height):
+    box = _bbox(item)
+    text = getattr(item, "text", None) or getattr(item, "orig", None) or ""
+    if box is None or not text.strip():
+        return 0
+    label = str(getattr(item, "label", ""))
+    size = _text_size(item, box)
+    bold = "title" in label or "section_header" in label
+    _append_vml_textbox(p, box.l, box.t, box.width, max(box.height * 1.25, size * 1.25), text, size, bold=bold)
+    return 1
+
+
+def _render_picture(p, item, dl_doc, assets, index):
+    box = _bbox(item)
+    if box is None:
+        return 0
+    image = item.get_image(dl_doc)
+    if image is None:
+        return 0
+    path = assets / f"picture-{index}.png"
+    image.save(path)
+    _append_floating_picture(p, path, box.l, box.t, box.width, box.height)
+    return 1
 
 
 def main():
@@ -183,37 +285,41 @@ def main():
     out.styles["Normal"].font.size = Pt(10.5)
     assets = target.parent / (target.stem + ".assets")
     assets.mkdir(parents=True, exist_ok=True)
-    items = _items(dl_doc)
 
+    total_text = total_tables = total_pictures = 0
+    all_items = list(_iter_items(dl_doc))
     for page_no in range(1, dl_doc.num_pages() + 1):
         page = dl_doc.pages.get(page_no)
         if page is None or page.size is None:
             continue
-        if page_no > 1:
-            section = out.add_section(WD_SECTION.NEW_PAGE)
-        else:
-            section = out.sections[0]
+        section = out.sections[0] if page_no == 1 else out.add_section(WD_SECTION.NEW_PAGE)
         section.page_width = Pt(page.size.width)
         section.page_height = Pt(page.size.height)
-        section.top_margin = section.bottom_margin = Pt(0)
-        section.left_margin = section.right_margin = Pt(0)
-        cursor = 0.0
-        for item in [x for x in items if _page(x) == page_no]:
+        _set_page_layout(section)
+        p = _page_anchor_paragraph(out)
+        picture_index = 0
+        page_items = [x for x in all_items if _page(x) == page_no]
+        # Render in Docling reading order. Each object is independently positioned
+        # against the PDF page, so columns and sidebars no longer collapse into one flow.
+        for item in page_items:
             label = str(getattr(item, "label", ""))
             try:
                 if "table" in label:
-                    cursor = _render_table(out, item, page.size.height, cursor)
+                    total_tables += _render_table(p, item, page.size.height)
                 elif "picture" in label or item.__class__.__name__.lower().endswith("pictureitem"):
-                    cursor = _render_picture(out, item, dl_doc, page.size.height, cursor, assets)
+                    picture_index += 1
+                    total_pictures += _render_picture(p, item, dl_doc, assets, f"{page_no}-{picture_index}")
                 elif hasattr(item, "text"):
-                    cursor = _render_text(out, item, page.size.height, cursor)
+                    total_text += _render_text(p, item, page.size.height)
             except Exception as exc:
                 print(f"warning: {item.__class__.__name__}: {exc}", file=sys.stderr)
 
     out.save(target)
     if not target.is_file() or target.stat().st_size == 0:
         raise RuntimeError("Docling produced no DOCX output")
-    print(f"Docling converted {source.name}: {dl_doc.num_pages()} pages")
+    if total_text + total_tables + total_pictures == 0:
+        raise RuntimeError("Docling produced an empty editable DOCX")
+    print(f"Docling converted {source.name}: {dl_doc.num_pages()} pages, {total_text} text boxes, {total_tables} table cells, {total_pictures} pictures")
     return 0
 
 
