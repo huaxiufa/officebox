@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
@@ -109,8 +109,7 @@ def _render_table(out, item, page_height, cursor):
                 for run in paragraph.runs:
                     run.bold = True
     if table.rows:
-        tr_pr = table.rows[0]._tr.get_or_add_trPr()
-        tr_pr.append(OxmlElement("w:tblHeader"))
+        table.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
     return max(cursor, top + box.height)
 
 
@@ -191,8 +190,9 @@ def main():
         if page is None or page.size is None:
             continue
         if page_no > 1:
-            out.add_page_break()
-        section = out.sections[-1]
+            section = out.add_section(WD_SECTION.NEW_PAGE)
+        else:
+            section = out.sections[0]
         section.page_width = Pt(page.size.width)
         section.page_height = Pt(page.size.height)
         section.top_margin = section.bottom_margin = Pt(0)
