@@ -48,8 +48,16 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Build application image
-        run: docker build -t officebox:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: officebox:ci
+          cache-from: type=gha,scope=officebox-docker
+          cache-to: type=gha,mode=max,scope=officebox-docker
       - name: Run application container
         run: |
           docker run -d --name officebox-ci -p 8080:8080 officebox:ci
@@ -61,16 +69,18 @@ jobs:
           done
           docker logs officebox-ci
           exit 1
-      - name: Smoke test PDF to Word conversion
+      - name: Smoke test direct Docling PDF to Word conversion
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          stream = b'BT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. First item. Second item.) Tj ET'
+          stream_obj = b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream'
           objects = [
               b'<< /Type /Catalog /Pages 2 0 R >>',
               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-              b'<< /Length 170 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. \\267 First item \\267 Second item) Tj ET\nendstream',
+              stream_obj,
               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
           ]
           pdf = bytearray(b'%PDF-1.4\n')
@@ -88,8 +98,36 @@ jobs:
           pdf.extend(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode())
           Path('/tmp/officebox-smoke.pdf').write_bytes(pdf)
           PY
-          curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
-            http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx
+          docker cp /tmp/officebox-smoke.pdf officebox-ci:/tmp/officebox-smoke.pdf
+          docker exec officebox-ci /opt/docling-venv/bin/python /app/docling_docx_bridge.py \
+            /tmp/officebox-smoke.pdf /tmp/direct-docling.docx
+          docker cp officebox-ci:/tmp/direct-docling.docx /tmp/direct-docling.docx
+          unzip -t /tmp/direct-docling.docx
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          from xml.etree import ElementTree as ET
+
+          ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+          with ZipFile('/tmp/direct-docling.docx') as zf:
+              root = ET.fromstring(zf.read('word/document.xml'))
+          text = ' '.join((t.text or '') for t in root.findall('.//w:t', ns))
+          assert 'OfficeBox PDF to Word smoke test' in text, text
+          assert 'Summary.' in text, text
+          assert 'First item.' in text, text
+          assert 'Second item.' in text, text
+          print('Direct Docling DOCX smoke test passed:', text)
+          PY
+      - name: Smoke test PDF to Word endpoint
+        run: |
+          if ! curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
+            http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx; then
+            echo 'PDF->Word endpoint returned an error; response body:'
+            cat /tmp/officebox-smoke.docx 2>/dev/null || true
+            echo
+            echo 'Container logs:'
+            docker logs officebox-ci
+            exit 1
+          fi
           unzip -t /tmp/officebox-smoke.docx
           python3 - <<'PY'
           from zipfile import ZipFile
@@ -105,8 +143,8 @@ jobs:
                   paragraphs.append(text)
           assert any('OfficeBox PDF to Word smoke test' in p for p in paragraphs)
           assert any('Summary.' in p for p in paragraphs)
-          assert any('• First item' in p for p in paragraphs)
-          assert any('• Second item' in p for p in paragraphs)
+          assert any('First item.' in p for p in paragraphs)
+          assert any('Second item.' in p for p in paragraphs)
           print('PDF->Word paragraph smoke test passed:', paragraphs)
           PY
       - name: Stop application container
