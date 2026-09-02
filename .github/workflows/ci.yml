@@ -69,7 +69,7 @@ jobs:
           done
           docker logs officebox-ci
           exit 1
-      - name: Smoke test PDF to Word conversion
+      - name: Smoke test direct Docling PDF to Word conversion
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -98,6 +98,27 @@ jobs:
           pdf.extend(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode())
           Path('/tmp/officebox-smoke.pdf').write_bytes(pdf)
           PY
+          docker cp /tmp/officebox-smoke.pdf officebox-ci:/tmp/officebox-smoke.pdf
+          docker exec officebox-ci /opt/docling-venv/bin/python /app/docling_docx_bridge.py \
+            /tmp/officebox-smoke.pdf /tmp/direct-docling.docx
+          docker cp officebox-ci:/tmp/direct-docling.docx /tmp/direct-docling.docx
+          unzip -t /tmp/direct-docling.docx
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          from xml.etree import ElementTree as ET
+
+          ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+          with ZipFile('/tmp/direct-docling.docx') as zf:
+              root = ET.fromstring(zf.read('word/document.xml'))
+          text = ' '.join((t.text or '') for t in root.findall('.//w:t', ns))
+          assert 'OfficeBox PDF to Word smoke test' in text, text
+          assert 'Summary.' in text, text
+          assert 'First item.' in text, text
+          assert 'Second item.' in text, text
+          print('Direct Docling DOCX smoke test passed:', text)
+          PY
+      - name: Smoke test PDF to Word endpoint
+        run: |
           if ! curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
             http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx; then
             echo 'PDF->Word endpoint returned an error; response body:'
