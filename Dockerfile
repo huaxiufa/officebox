@@ -20,7 +20,7 @@ RUN apt-get update \
     && python3 -m venv /opt/pdf2docx-venv \
     && /opt/pdf2docx-venv/bin/pip install --no-cache-dir --disable-pip-version-check pdf2docx \
     && python3 -m venv /opt/docling-venv \
-    && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check docling==2.124.0 \
+    && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check docling==2.124.0 PyMuPDF \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend-build /app/backend/target/*.jar /app/officebox.jar
