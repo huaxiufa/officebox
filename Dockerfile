@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends libreoffice ghostscript poppler-utils curl python3 python3-venv \
-        tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
+        tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng libgl1 \
     && python3 -m venv /opt/pdf2docx-venv \
     && /opt/pdf2docx-venv/bin/pip install --no-cache-dir --disable-pip-version-check pdf2docx \
     && python3 -m venv /opt/docling-venv \
