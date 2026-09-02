@@ -1,20 +1,26 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm npm ci --prefer-offline
 COPY frontend/ ./
 RUN npm run build
 
 FROM maven:3.9.9-eclipse-temurin-21 AS backend-build
 WORKDIR /app
 COPY backend/pom.xml ./backend/pom.xml
-RUN mvn -f backend/pom.xml dependency:go-offline -B
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -f backend/pom.xml dependency:go-offline -B
 COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist/ ./backend/src/main/resources/static/
-RUN mvn -f backend/pom.xml package -DskipTests -B
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -f backend/pom.xml package -DskipTests -B
 
 FROM eclipse-temurin:21-jre-jammy
-RUN apt-get update \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends libreoffice ghostscript poppler-utils curl python3 python3-venv \
         tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
     && python3 -m venv /opt/pdf2docx-venv \
