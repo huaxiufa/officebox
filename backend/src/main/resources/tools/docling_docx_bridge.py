@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """PDF -> DOCX using Docling layout data and positioned editable Word shapes."""
-import html
 import os
 import sys
 from pathlib import Path
@@ -18,7 +17,6 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import ContentLayer
 
 EMU_PER_PT = 12700
-TWIPS_PER_PT = 20
 
 
 def _num(name, default):
@@ -46,7 +44,6 @@ def _text_size(item, box):
     explicit = getattr(item, "font_size", None)
     if explicit:
         return max(6.0, min(72.0, float(explicit)))
-    # Docling's PDF bbox is in points. A glyph box is normally ~0.8 of font size.
     h = max(1.0, float(box.height))
     size = h * 1.18
     label = str(getattr(item, "label", ""))
@@ -73,7 +70,6 @@ def _page_anchor_paragraph(out):
     pf.space_after = Pt(0)
     pf.line_spacing = 1
     pf.keep_together = True
-    pf.keep_with_next = False
     return p
 
 
@@ -82,7 +78,7 @@ def _append_vml_textbox(p, x, y, w, h, text, font_size, bold=False, border=False
     run = p.add_run()
     pict = OxmlElement("w:pict")
     shape = OxmlElement("v:shape")
-    shape.set(qn("style"),
+    shape.set("style",
               "position:absolute;"
               f"margin-left:{_pt(x):.2f}pt;"
               f"margin-top:{_pt(y):.2f}pt;"
@@ -93,10 +89,10 @@ def _append_vml_textbox(p, x, y, w, h, text, font_size, bold=False, border=False
               "mso-position-vertical-relative:page;"
               "mso-wrap-edited:f;")
     shape.set("type", "#_x0000_t202")
-    shape.set(qn("fillcolor"), fill or "white")
-    shape.set(qn("stroked"), "t" if border else "f")
+    shape.set("fillcolor", fill or "white")
+    shape.set("stroked", "t" if border else "f")
     if border:
-        shape.set(qn("strokeweight"), "0.5pt")
+        shape.set("strokeweight", "0.5pt")
     textbox = OxmlElement("v:textbox")
     textbox.set("inset", "0,0,0,0")
     tx = OxmlElement("w:txbxContent")
@@ -134,14 +130,10 @@ def _append_vml_textbox(p, x, y, w, h, text, font_size, bold=False, border=False
 
 
 def _append_floating_picture(p, image_path, x, y, w, h):
-    """Create a floating DrawingML image anchored to the page."""
-    from docx.shared import Inches
-
     r = p.add_run()
     inline = r.add_picture(str(image_path), width=Pt(max(1, w)), height=Pt(max(1, h)))
-    drawing = inline._inline
-    drawing.tag = qn("wp:anchor")
-    anchor = drawing
+    anchor = inline._inline
+    anchor.tag = qn("wp:anchor")
     anchor.set("distT", "0")
     anchor.set("distB", "0")
     anchor.set("distL", "0")
@@ -162,7 +154,6 @@ def _append_floating_picture(p, image_path, x, y, w, h):
     pos_v.append(off_v)
     anchor.insert(0, pos_h)
     anchor.insert(1, pos_v)
-    return inline
 
 
 def _iter_items(doc):
@@ -191,8 +182,10 @@ def _table_cell_bbox(cell, table_box, rows, cols):
     ec = int(cell.end_col_offset_idx)
     cw = table_box.width / max(1, cols)
     ch = table_box.height / max(1, rows)
+
     class B:
         pass
+
     b = B()
     b.l = table_box.l + sc * cw
     b.r = table_box.l + ec * cw
@@ -203,7 +196,7 @@ def _table_cell_bbox(cell, table_box, rows, cols):
     return b
 
 
-def _render_table(p, item, page_height):
+def _render_table(p, item):
     box = _bbox(item)
     data = getattr(item, "data", None)
     if box is None or data is None or not data.num_rows or not data.num_cols:
@@ -214,10 +207,9 @@ def _render_table(p, item, page_height):
         text = (getattr(cell, "text", "") or "").strip()
         if not text:
             continue
-        y = cb.t
         size = max(7.0, min(24.0, cb.height * 0.42))
         _append_vml_textbox(
-            p, cb.l, y, cb.width, max(6, cb.height), text, size,
+            p, cb.l, cb.t, cb.width, max(6, cb.height), text, size,
             bold=bool(getattr(cell, "column_header", False) or getattr(cell, "row_header", False)),
             border=True,
             fill="white",
@@ -226,7 +218,7 @@ def _render_table(p, item, page_height):
     return count
 
 
-def _render_text(p, item, page_height):
+def _render_text(p, item):
     box = _bbox(item)
     text = getattr(item, "text", None) or getattr(item, "orig", None) or ""
     if box is None or not text.strip():
@@ -299,18 +291,16 @@ def main():
         p = _page_anchor_paragraph(out)
         picture_index = 0
         page_items = [x for x in all_items if _page(x) == page_no]
-        # Render in Docling reading order. Each object is independently positioned
-        # against the PDF page, so columns and sidebars no longer collapse into one flow.
         for item in page_items:
             label = str(getattr(item, "label", ""))
             try:
                 if "table" in label:
-                    total_tables += _render_table(p, item, page.size.height)
+                    total_tables += _render_table(p, item)
                 elif "picture" in label or item.__class__.__name__.lower().endswith("pictureitem"):
                     picture_index += 1
                     total_pictures += _render_picture(p, item, dl_doc, assets, f"{page_no}-{picture_index}")
                 elif hasattr(item, "text"):
-                    total_text += _render_text(p, item, page.size.height)
+                    total_text += _render_text(p, item)
             except Exception as exc:
                 print(f"warning: {item.__class__.__name__}: {exc}", file=sys.stderr)
 
