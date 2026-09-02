@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""OfficeBox PDF -> HTML bridge powered by Docling.
-
-Docling performs the PDF parsing, layout analysis, OCR and table reconstruction.
-The Java side then uses LibreOffice to turn the structured HTML into editable
-DOCX. HTML is used as the interchange format because Docling currently exposes
-HTML/Markdown/JSON as its structured exports rather than a native DOCX writer.
-"""
+"""OfficeBox PDF -> structured HTML bridge powered by Docling."""
 import sys
 from pathlib import Path
 
@@ -18,19 +12,40 @@ from docling_core.types.doc import ImageRefMode
 HTML_HEAD = """
 <meta charset="utf-8">
 <style>
-  @page { size: A4; margin: 16mm 14mm 16mm 14mm; }
+  @page { margin: 12mm 14mm 14mm 14mm; }
+  html, body { margin: 0; padding: 0; }
   body {
-    font-family: Arial, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+    font-family: "Noto Sans CJK SC", "Microsoft YaHei", Arial, sans-serif;
     font-size: 10.5pt;
-    line-height: 1.35;
+    line-height: 1.25;
     color: #222;
+    overflow-wrap: break-word;
   }
-  h1, h2, h3, h4, h5, h6 { page-break-after: avoid; }
-  p, li, table { page-break-inside: avoid; }
-  table { width: 100%; border-collapse: collapse; margin: 6pt 0; }
-  th, td { border: 0.5pt solid #999; padding: 3pt 5pt; vertical-align: top; }
+  h1 { font-size: 20pt; line-height: 1.15; margin: 0 0 8pt; }
+  h2 { font-size: 15pt; line-height: 1.2; margin: 10pt 0 5pt; }
+  h3 { font-size: 12pt; line-height: 1.2; margin: 8pt 0 4pt; }
+  h4, h5, h6 { margin: 6pt 0 3pt; }
+  h1, h2, h3, h4, h5, h6 { page-break-after: avoid; break-after: avoid; }
+  p { margin: 0 0 4pt; }
+  ul, ol { margin-top: 2pt; margin-bottom: 4pt; padding-left: 18pt; }
+  li { margin: 0 0 2pt; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 5pt 0 7pt;
+    font-size: 10pt;
+  }
+  th, td {
+    border: 0.5pt solid #888;
+    padding: 3pt 5pt;
+    vertical-align: top;
+  }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
   img { max-width: 100%; height: auto; }
-  .page { page-break-after: always; }
+  a { color: inherit; text-decoration: none; }
+  .page { break-after: page; }
+  .page:last-child { break-after: auto; }
 </style>
 """
 
@@ -53,7 +68,7 @@ def main() -> int:
     pipeline_options.do_table_structure = True
     pipeline_options.generate_picture_images = True
     pipeline_options.generate_table_images = True
-    pipeline_options.images_scale = 1.5
+    pipeline_options.images_scale = 2.0
 
     converter = DocumentConverter(
         format_options={
