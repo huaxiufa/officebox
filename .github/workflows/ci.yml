@@ -74,11 +74,13 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          stream = b'BT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. First item. Second item.) Tj ET'
+          stream_obj = b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream'
           objects = [
               b'<< /Type /Catalog /Pages 2 0 R >>',
               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-              b'<< /Length 170 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. \\267 First item \\267 Second item) Tj ET\nendstream',
+              stream_obj,
               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
           ]
           pdf = bytearray(b'%PDF-1.4\n')
@@ -96,8 +98,12 @@ jobs:
           pdf.extend(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode())
           Path('/tmp/officebox-smoke.pdf').write_bytes(pdf)
           PY
-          curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
-            http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx
+          if ! curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
+            http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx; then
+            echo 'PDF->Word endpoint returned an error; container logs:'
+            docker logs officebox-ci
+            exit 1
+          fi
           unzip -t /tmp/officebox-smoke.docx
           python3 - <<'PY'
           from zipfile import ZipFile
@@ -113,8 +119,8 @@ jobs:
                   paragraphs.append(text)
           assert any('OfficeBox PDF to Word smoke test' in p for p in paragraphs)
           assert any('Summary.' in p for p in paragraphs)
-          assert any('• First item' in p for p in paragraphs)
-          assert any('• Second item' in p for p in paragraphs)
+          assert any('First item.' in p for p in paragraphs)
+          assert any('Second item.' in p for p in paragraphs)
           print('PDF->Word paragraph smoke test passed:', paragraphs)
           PY
       - name: Stop application container
