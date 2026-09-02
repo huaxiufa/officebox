@@ -77,10 +77,11 @@ public class PdfToWordService {
 
             return error(500, "PDF 转 Word 失败: Docling=" + summarize(doclingFailure)
                     + "; pdf2docx 引擎不可用");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return error(500, "PDF 转 Word 被中断");
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                return error(500, "PDF 转 Word 被中断");
+            }
             log.error("PDF to Word request failed before conversion completed", e);
             return error(500, "PDF 转 Word 失败: " + summarize(e));
         } finally {
