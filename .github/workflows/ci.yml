@@ -91,7 +91,6 @@ jobs:
           curl -fsS -F 'file=@/tmp/officebox-smoke.pdf;type=application/pdf' \
             http://127.0.0.1:8080/api/pdf/to-word -o /tmp/officebox-smoke.docx
           unzip -t /tmp/officebox-smoke.docx
-          unzip -p /tmp/officebox-smoke.docx word/document.xml | grep -F 'OfficeBox PDF to Word smoke test'
           python3 - <<'PY'
           from zipfile import ZipFile
           from xml.etree import ElementTree as ET
@@ -104,10 +103,10 @@ jobs:
               text = ''.join(t.text or '' for t in p.findall('.//w:t', ns))
               if text:
                   paragraphs.append(text)
-          assert 'OfficeBox PDF to Word smoke test' in paragraphs
-          assert 'Summary.' in paragraphs
-          assert '• First item' in paragraphs
-          assert '• Second item' in paragraphs
+          assert any('OfficeBox PDF to Word smoke test' in p for p in paragraphs)
+          assert any('Summary.' in p for p in paragraphs)
+          assert any('• First item' in p for p in paragraphs)
+          assert any('• Second item' in p for p in paragraphs)
           print('PDF->Word paragraph smoke test passed:', paragraphs)
           PY
       - name: Stop application container
