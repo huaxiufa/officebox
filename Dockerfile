@@ -22,12 +22,13 @@ RUN apt-get update \
     && python3 -m venv /opt/docling-venv \
     && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check \
         torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu \
-    && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check docling==2.124.0 PyMuPDF \
+    && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check docling==2.124.0 PyMuPDF python-docx \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend-build /app/backend/target/*.jar /app/officebox.jar
 COPY --from=backend-build /app/backend/src/main/resources/tools/pdf2docx_bridge.py /app/pdf2docx_bridge.py
 COPY --from=backend-build /app/backend/src/main/resources/tools/docling_bridge.py /app/docling_bridge.py
+COPY --from=backend-build /app/backend/src/main/resources/tools/docling_docx_bridge.py /app/docling_docx_bridge.py
 RUN mkdir -p /app/data /tmp/officebox \
     && useradd --create-home --uid 10001 officebox \
     && chown -R officebox:officebox /app /tmp/officebox
