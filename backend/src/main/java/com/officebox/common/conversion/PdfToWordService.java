@@ -18,22 +18,35 @@ import org.springframework.stereotype.Service;
 public class PdfToWordService {
   private final PdfPageParser pageParser;
   private final DocxRenderer renderer;
-  private final Pdf2DocxEngine highFidelityEngine;
+  private final DoclingEngine doclingEngine;
+  private final Pdf2DocxEngine legacyEngine;
 
   @Autowired
   public PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer) {
-    this(pageParser, renderer, new Pdf2DocxEngine());
+    this(pageParser, renderer, new DoclingEngine(), new Pdf2DocxEngine());
   }
 
   /** Backward-compatible constructor for focused unit tests and callers that only customize parsing. */
   public PdfToWordService(PdfPageParser pageParser) {
-    this(pageParser, new DocxRenderer(), new Pdf2DocxEngine());
+    this(pageParser, new DocxRenderer(), new DoclingEngine(), new Pdf2DocxEngine());
   }
 
-  PdfToWordService(PdfPageParser pageParser, DocxRenderer renderer, Pdf2DocxEngine highFidelityEngine) {
+  PdfToWordService(
+      PdfPageParser pageParser,
+      DocxRenderer renderer,
+      Pdf2DocxEngine legacyEngine) {
+    this(pageParser, renderer, new DoclingEngine(), legacyEngine);
+  }
+
+  PdfToWordService(
+      PdfPageParser pageParser,
+      DocxRenderer renderer,
+      DoclingEngine doclingEngine,
+      Pdf2DocxEngine legacyEngine) {
     this.pageParser = pageParser;
     this.renderer = renderer;
-    this.highFidelityEngine = highFidelityEngine;
+    this.doclingEngine = doclingEngine;
+    this.legacyEngine = legacyEngine;
   }
 
   public Path convert(Path input, Path outputDirectory, Consumer<TaskProgress> progress) throws IOException {
@@ -46,13 +59,15 @@ public class PdfToWordService {
     Path result = outputRoot.resolve(base + ".docx").normalize();
     if (!result.startsWith(outputRoot)) throw new IOException("Invalid output path");
 
-    // Prefer the open-source layout reconstruction engine when installed in the
-    // production image. This is the path intended for high-fidelity conversion.
-    if (highFidelityEngine.isAvailable()) {
-      progress.accept(new TaskProgress(15, "Reconstructing PDF layout"));
+    // Docling is the default PDF engine. It performs layout-aware document
+    // understanding and emits structured HTML, which LibreOffice converts to
+    // an editable DOCX. The older pdf2docx bridge remains a fallback so that
+    // deployments can still convert documents if Docling is unavailable.
+    if (doclingEngine.isAvailable()) {
+      progress.accept(new TaskProgress(15, "Analyzing PDF with Docling"));
       try {
-        if (highFidelityEngine.convert(input, result)) {
-          progress.accept(new TaskProgress(95, "DOCX generated with layout reconstruction"));
+        if (doclingEngine.convert(input, result)) {
+          progress.accept(new TaskProgress(95, "DOCX generated with Docling"));
           return result;
         }
       } catch (InterruptedException e) {
@@ -61,8 +76,21 @@ public class PdfToWordService {
       }
     }
 
-    // Keep the Java renderer as a deterministic fallback for environments that
-    // do not have the optional Python engine (notably unit tests).
+    if (legacyEngine.isAvailable()) {
+      progress.accept(new TaskProgress(20, "Falling back to pdf2docx"));
+      try {
+        if (legacyEngine.convert(input, result)) {
+          progress.accept(new TaskProgress(95, "DOCX generated with pdf2docx fallback"));
+          return result;
+        }
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IOException("PDF to DOCX conversion interrupted", e);
+      }
+    }
+
+    // Keep the Java renderer as the final deterministic fallback for environments
+    // that do not have either optional Python engine (notably unit tests).
     progress.accept(new TaskProgress(20, "Analyzing PDF"));
     List<PageModel> pages = new ArrayList<>();
     try (PDDocument document = Loader.loadPDF(input.toFile())) {
