@@ -31,7 +31,7 @@ public class PdfLayoutAnalyzer {
     if (text.size() < 6) return null;
     List<List<TextBlock>> rows = new ArrayList<>();
     for (TextBlock block : text) {
-      List<TextBlock> row = rows.isEmpty() ? null : rows.get(rows.size() - 1);
+      List<TextBlock> row = rows.isEmpty() ? null : rows.getLast();
       if (row == null || Math.abs(row.getFirst().bounds().y() - block.bounds().y()) > Math.max(4, block.bounds().height() * .65)) {
         row = new ArrayList<>(); rows.add(row);
       }
@@ -41,9 +41,12 @@ public class PdfLayoutAnalyzer {
     if (rows.size() < 3) return null;
     rows = rows.stream().map(r -> r.stream().sorted(Comparator.comparingDouble(b -> b.bounds().x())).toList()).toList();
     int columns = rows.stream().mapToInt(List::size).min().orElse(0);
-    if (columns < 2) return null;
+    if (columns < 2 || columns > 8) return null;
     long strongRows = rows.stream().filter(r -> r.size() == columns || r.size() == columns + 1).count();
     if (strongRows < Math.max(3, rows.size() * .65)) return null;
+    List<TextBlock> candidateCells = rows.stream().flatMap(List::stream).toList();
+    double averageLength = candidateCells.stream().mapToInt(b -> b.text().trim().length()).average().orElse(999);
+    if (columns == 2 && averageLength > 36) return null;
     double xSpread = columnSpread(rows, columns);
     if (xSpread < 12) return null;
     List<List<TextBlock>> normalized = rows.stream().map(r -> r.size() <= columns ? r : r.subList(0, columns)).toList();
