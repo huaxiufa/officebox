@@ -200,7 +200,7 @@ public class DocxRenderer {
       } else {
         run.setColor(heading ? ACCENT : TEXT);
       }
-      run.getCTR().getRPr().getRFonts().setEastAsia(CJK_FONT);
+      run.setFontFamily(CJK_FONT, XWPFRun.FontCharRange.EAST_ASIA);
     }
     if (bullet) {
       paragraph.setIndentationLeft(twips(16));
