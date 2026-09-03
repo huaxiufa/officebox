@@ -15,25 +15,28 @@ RUN mvn -f backend/pom.xml package -DskipTests -B
 
 FROM eclipse-temurin:21-jre-jammy
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libreoffice ghostscript poppler-utils curl python3 python3-venv \
+    && apt-get install -y --no-install-recommends \
+        libreoffice ghostscript poppler-utils curl python3 python3-venv \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+        fontconfig fonts-noto-core fonts-noto-cjk \
         tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
-    && python3 -m venv /opt/pdf2docx-venv \
-    && /opt/pdf2docx-venv/bin/pip install --no-cache-dir --disable-pip-version-check pdf2docx \
     && python3 -m venv /opt/docling-venv \
     && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check \
         torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu \
-    && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check docling==2.124.0 PyMuPDF \
+    && /opt/docling-venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+        docling==2.124.0 PyMuPDF \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend-build /app/backend/target/*.jar /app/officebox.jar
-COPY --from=backend-build /app/backend/src/main/resources/tools/pdf2docx_bridge.py /app/pdf2docx_bridge.py
 COPY --from=backend-build /app/backend/src/main/resources/tools/docling_bridge.py /app/docling_bridge.py
 RUN mkdir -p /app/data /tmp/officebox \
     && useradd --create-home --uid 10001 officebox \
     && chown -R officebox:officebox /app /tmp/officebox
 USER officebox
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0" \
-    DOCLING_DEVICE=cpu
+    DOCLING_DEVICE=cpu \
+    HOME=/home/officebox
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1
 ENTRYPOINT ["java", "-jar", "/app/officebox.jar"]
