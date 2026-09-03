@@ -102,7 +102,6 @@ public class DocxRenderer {
       if (block instanceof TableBlock nested) {
         XWPFParagraph anchor = cell.addParagraph();
         positionParagraph(anchor, block, previousBottom, originX);
-        // Nested tables are rare; render their cells as paragraphs rather than losing content.
         for (List<TextBlock> row : nested.rows()) for (TextBlock text : row) {
           XWPFParagraph p = cell.addParagraph(); writeSpans(p, text.spans());
         }
@@ -135,10 +134,11 @@ public class DocxRenderer {
           ? wordTable.getCTTbl().getTblPr().getTblLayout() : wordTable.getCTTbl().getTblPr().addNewTblLayout();
       layout.setType(STTblLayoutType.FIXED);
       wordTable.getCTTbl().getTblPr().unsetTblBorders();
-      // insertNewTbl creates a one-row/one-cell table; resize it to the detected grid.
       int targetRows = table.rows().size();
       int targetCols = table.rows().stream().mapToInt(List::size).max().orElse(1);
-      while (wordTable.getNumberOfRows() < targetRows) wordTable.addRow();
+      while (wordTable.getNumberOfRows() < targetRows) {
+        wordTable.addRow(new XWPFTableRow(wordTable.getCTTbl().addNewTr()));
+      }
       while (wordTable.getRow(0).getTableCells().size() < targetCols) wordTable.getRow(0).addNewTableCell();
       for (int r = 0; r < targetRows; r++) {
         XWPFTableRow row = wordTable.getRow(r);
