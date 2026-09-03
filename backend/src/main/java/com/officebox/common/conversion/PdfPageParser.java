@@ -28,10 +28,15 @@ import org.apache.pdfbox.text.TextPosition;
 import org.apache.pdfbox.util.Matrix;
 import org.springframework.stereotype.Component;
 
-/** Extracts PDF text and raster artwork into a coordinate-aware intermediate representation. */
+/** Extracts PDF content into a coordinate-aware intermediate representation. */
 @Component
 public class PdfPageParser {
   private static final float ARTWORK_DPI = 144f;
+  private final PdfLayoutAnalyzer layoutAnalyzer;
+
+  public PdfPageParser(PdfLayoutAnalyzer layoutAnalyzer) {
+    this.layoutAnalyzer = layoutAnalyzer;
+  }
 
   public PageModel parse(PDDocument document, int pageNumber) throws IOException {
     PDPage page = document.getPage(pageNumber - 1);
@@ -47,24 +52,34 @@ public class PdfPageParser {
       if (line.glyphs.isEmpty()) continue;
       List<TextSpan> spans = new ArrayList<>();
       Span current = null;
+      Glyph previous = null;
       for (Glyph glyph : line.glyphs) {
         boolean bold = glyph.font.toLowerCase().contains("bold") || glyph.font.toLowerCase().contains("black");
         boolean italic = glyph.font.toLowerCase().contains("italic") || glyph.font.toLowerCase().contains("oblique");
+        boolean needsSpace = previous != null && !previous.text.isBlank() && !glyph.text.isBlank()
+            && glyph.x - previous.right() > Math.max(1.2, glyph.size * .22);
+        if (needsSpace && current != null) {
+          int last = spans.size() - 1;
+          TextSpan previousSpan = spans.get(last);
+          spans.set(last, new TextSpan(previousSpan.text() + " ", previousSpan.bounds(), previousSpan.fontName(),
+              previousSpan.fontSize(), previousSpan.red(), previousSpan.green(), previousSpan.blue(), previousSpan.bold(), previousSpan.italic()));
+        }
         if (current == null || Math.abs(current.size - glyph.size) > .5 || current.bold != bold
             || current.italic != italic || !current.font.equals(glyph.font)) {
           current = new Span(glyph.text, glyph.size, glyph.font, bold, italic, glyph.x, glyph.y, glyph.width, glyph.height);
           spans.add(current.toTextSpan());
         } else {
           int last = spans.size() - 1;
-          TextSpan previous = spans.get(last);
-          spans.set(last, new TextSpan(previous.text() + glyph.text,
-              new BoundingBox(previous.bounds().x(), previous.bounds().y(),
-                  Math.max(previous.bounds().width(), glyph.x + glyph.width - previous.bounds().x()),
-                  Math.max(previous.bounds().height(), glyph.y + glyph.height - previous.bounds().y())),
-              previous.fontName(), previous.fontSize(), previous.red(), previous.green(), previous.blue(),
-              previous.bold(), previous.italic()));
-          current.width += glyph.width;
+          TextSpan old = spans.get(last);
+          spans.set(last, new TextSpan(old.text() + glyph.text,
+              new BoundingBox(old.bounds().x(), old.bounds().y(),
+                  Math.max(old.bounds().width(), glyph.right() - old.bounds().x()),
+                  Math.max(old.bounds().height(), glyph.y + glyph.height - old.bounds().y())),
+              old.fontName(), old.fontSize(), old.red(), old.green(), old.blue(), old.bold(), old.italic()));
+          current.width = Math.max(current.width, glyph.right() - current.x);
+          current.height = Math.max(current.height, glyph.y + glyph.height - current.y);
         }
+        previous = glyph;
       }
       double minX = spans.stream().mapToDouble(s -> s.bounds().x()).min().orElse(0);
       double minY = spans.stream().mapToDouble(s -> s.bounds().y()).min().orElse(0);
@@ -78,8 +93,7 @@ public class PdfPageParser {
     extractor.processPage(page);
     blocks.addAll(extractor.images());
     if (blocks.isEmpty()) blocks.add(renderPageArtwork(document, pageNumber, width, height));
-    blocks.sort(Comparator.comparingDouble((PageBlock b) -> b.bounds().y()).thenComparingDouble(b -> b.bounds().x()));
-    return new PageModel(pageNumber, width, height, List.copyOf(blocks));
+    return new PageModel(pageNumber, width, height, layoutAnalyzer.analyze(blocks));
   }
 
   private static ImageBlock renderPageArtwork(PDDocument document, int pageNumber, double width, double height) throws IOException {
@@ -129,7 +143,8 @@ public class PdfPageParser {
     PositionStripper() throws IOException { super(); }
     @Override protected void writeString(String text, List<TextPosition> positions) {
       for (TextPosition p : positions) {
-        String value = p.getUnicode(); if (value == null || value.isEmpty()) continue;
+        String value = p.getUnicode();
+        if (value == null || value.isEmpty()) continue;
         glyphs.add(new Glyph(value, p.getXDirAdj(), p.getYDirAdj(), p.getWidthDirAdj(), p.getHeightDir(), p.getFontSizeInPt(), p.getFont() == null ? "" : p.getFont().getName()));
       }
     }
@@ -154,6 +169,7 @@ public class PdfPageParser {
   private static final class Glyph {
     final String text, font; final double x, y, width, height, size;
     Glyph(String text, double x, double y, double width, double height, double size, String font) { this.text=text; this.x=x; this.y=y; this.width=width; this.height=height; this.size=size; this.font=font; }
+    double right() { return x + width; }
   }
   private static final class Line {
     final double y; final List<Glyph> glyphs = new ArrayList<>(); Line(double y){this.y=y;}
