@@ -19,17 +19,14 @@ import org.apache.poi.xwpf.model.XWPFHeaderFooterPolicy;
 import org.apache.poi.xwpf.usermodel.Document;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.apache.poi.xwpf.usermodel.XWPFHeader;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
-import org.apache.poi.xwpf.usermodel.XWPFStyles;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell.XWPFVertAlign;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
-import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTStyle;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblBorders;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTblLayoutType;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTcPr;
@@ -43,8 +40,6 @@ import org.springframework.stereotype.Component;
 /** Renders the coordinate-aware PDF model as editable, styled DOCX content. */
 @Component
 public class DocxRenderer {
-  private static final String BODY_STYLE = "OfficeBoxBody";
-  private static final String HEADING_STYLE = "OfficeBoxHeading";
   private static final String ACCENT = "1F4E79";
   private static final String TEXT = "222222";
   private static final String MUTED = "666666";
@@ -57,7 +52,6 @@ public class DocxRenderer {
     if (parent != null) Files.createDirectories(parent);
 
     try (XWPFDocument document = new XWPFDocument()) {
-      configureStyles(document);
       XWPFHeaderFooterPolicy headerFooter = document.createHeaderFooterPolicy();
       addFooter(headerFooter);
       for (int i = 0; i < pages.size(); i++) {
@@ -76,40 +70,7 @@ public class DocxRenderer {
     return output;
   }
 
-  private static void configureStyles(XWPFDocument document) {
-    XWPFStyles styles = document.createStyles();
-    addStyle(styles, BODY_STYLE, "Normal", 10.5, TEXT, false, 1.15, 0, 5);
-    addStyle(styles, HEADING_STYLE, "Normal", 15, ACCENT, true, 1.0, 14, 7);
-
-    CTStyle normal = styles.getStyle("Normal");
-    if (normal == null) normal = styles.getCTStyles().addNewStyle();
-    if (!normal.isSetRPr()) normal.addNewRPr();
-    if (!normal.getRPr().isSetRFonts()) normal.getRPr().addNewRFonts();
-    normal.getRPr().getRFonts().setAscii(DEFAULT_FONT);
-    normal.getRPr().getRFonts().setHAnsi(DEFAULT_FONT);
-    normal.getRPr().getRFonts().setEastAsia(CJK_FONT);
-    normal.getRPr().addNewSz().setVal(BigInteger.valueOf(21));
-  }
-
-  private static void addStyle(XWPFStyles styles, String id, String basedOn, double size,
-      String color, boolean bold, double lineSpacing, int before, int after) {
-    CTStyle style = styles.getCTStyles().addNewStyle();
-    style.setStyleId(id);
-    style.addNewName().setVal(id);
-    style.addNewBasedOn().setVal(basedOn);
-    style.addNewPPr().addNewSpacing().setBefore(BigInteger.valueOf(before * 20L));
-    style.getPPr().getSpacing().setAfter(BigInteger.valueOf(after * 20L));
-    style.getPPr().getSpacing().setLine(BigInteger.valueOf(Math.round(lineSpacing * 240)));
-    style.addNewRPr().addNewRFonts().setAscii(DEFAULT_FONT);
-    style.getRPr().getRFonts().setHAnsi(DEFAULT_FONT);
-    style.getRPr().getRFonts().setEastAsia(CJK_FONT);
-    style.getRPr().addNewSz().setVal(BigInteger.valueOf(Math.round(size * 2)));
-    style.getRPr().addNewColor().setVal(color);
-    if (bold) style.getRPr().addNewB();
-  }
-
   private static void addFooter(XWPFHeaderFooterPolicy policy) {
-    XWPFHeader footerContainer = null;
     var footer = policy.createFooter(XWPFHeaderFooterPolicy.DEFAULT);
     XWPFParagraph paragraph = footer.createParagraph();
     paragraph.setAlignment(ParagraphAlignment.CENTER);
@@ -209,13 +170,9 @@ public class DocxRenderer {
   }
 
   private static void styleParagraph(XWPFParagraph paragraph, PageBlock block, boolean heading) {
-    paragraph.setStyle(heading ? HEADING_STYLE : BODY_STYLE);
     paragraph.setSpacingAfter(heading ? twips(7) : twips(5));
-    paragraph.setLineSpacing(heading ? 1.0 : 1.15);
     paragraph.setAlignment(ParagraphAlignment.LEFT);
     paragraph.setKeepNext(heading);
-    paragraph.setKeepLines(heading);
-    paragraph.setWidowControl(true);
     if (block instanceof TextBlock text && isBullet(text.text())) {
       paragraph.setIndentationLeft(twips(16));
       paragraph.setIndentationHanging(twips(10));
@@ -234,7 +191,8 @@ public class DocxRenderer {
       double size = heading ? Math.max(13, Math.min(16, span.fontSize() + 1.5))
           : Math.max(8.5, Math.min(13, span.fontSize()));
       run.setFontSize((float) size);
-      run.setFontFamily(normalizeFont(span.fontName()).isBlank() ? DEFAULT_FONT : normalizeFont(span.fontName()));
+      String font = normalizeFont(span.fontName());
+      run.setFontFamily(font.isBlank() ? DEFAULT_FONT : font);
       run.setBold(span.bold() || heading);
       run.setItalic(span.italic());
       if (span.red() != 0 || span.green() != 0 || span.blue() != 0) {
@@ -242,13 +200,16 @@ public class DocxRenderer {
       } else {
         run.setColor(heading ? ACCENT : TEXT);
       }
+      run.getCTR().getRPr().getRFonts().setEastAsia(CJK_FONT);
     }
     if (bullet) {
       paragraph.setIndentationLeft(twips(16));
       paragraph.setIndentationHanging(twips(10));
-      XWPFRun bulletRun = paragraph.getRuns().isEmpty() ? paragraph.createRun() : paragraph.getRuns().get(0);
-      if (!bulletRun.getText(0).contains("•")) {
-        bulletRun.setText("• " + bulletRun.getText(0), 0);
+      if (!paragraph.getRuns().isEmpty()) {
+        XWPFRun bulletRun = paragraph.getRuns().get(0);
+        String current = bulletRun.getText(0);
+        if (current == null) current = "";
+        if (!current.contains("•")) bulletRun.setText("• " + current, 0);
       }
     }
   }
