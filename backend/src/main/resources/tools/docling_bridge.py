@@ -2,8 +2,9 @@
 """OfficeBox PDF -> editable HTML bridge powered by Docling.
 
 Docling performs PDF understanding. LibreOffice converts the structured HTML
-into the final editable DOCX. The markdown fallback protects small PDFs where
-the HTML serializer can produce an empty/near-empty body.
+into the final editable DOCX. A tiny PyMuPDF text-recovery fallback is used
+only when Docling's serializer/OCR loses text (common with legacy PDF font
+encodings); Docling remains the primary conversion engine.
 """
 import base64
 import html as html_lib
@@ -74,6 +75,22 @@ def _extract_header_images(pdf_path: Path):
         return None, None
 
 
+def _raw_pdf_text(pdf_path: Path) -> str:
+    """Recover text from the PDF only when Docling loses legacy-encoded glyphs."""
+    try:
+        import fitz
+        pdf = fitz.open(pdf_path)
+        text = "\n".join(page.get_text("text") for page in pdf)
+        pdf.close()
+        return text.strip()
+    except Exception:
+        return ""
+
+
+def _text_quality(value: str) -> int:
+    return len(re.sub(r"\s+", "", value or ""))
+
+
 def _fix_list_markup(source: str) -> str:
     pattern = re.compile(r"<p([^>]*)>\s*•\s*(.*?)\s*</p>", re.I | re.S)
     return pattern.sub(r'<ul class="docling-list"><li\1>\2</li></ul>', source)
@@ -87,7 +104,7 @@ def _visible_text(source: str) -> str:
 
 
 def _markdown_fallback(markdown: str) -> str:
-    """Create conservative valid HTML from Docling markdown."""
+    """Create conservative valid HTML from Docling or recovered text."""
     out = []
     in_ul = in_ol = False
 
@@ -188,26 +205,36 @@ def main() -> int:
         raise RuntimeError("Docling parsed zero PDF pages")
 
     extracted_text = document.export_to_text(traverse_pictures=True).strip()
+    raw_text = _raw_pdf_text(source)
     document.save_as_html(target, image_mode=ImageRefMode.EMBEDDED, split_page_view=False, html_head=HTML_HEAD)
     generated = _fix_list_markup(target.read_text(encoding="utf-8") if target.exists() else "")
 
     visible = _visible_text(generated)
-    # Keep Docling HTML whenever it contains useful content. If its serializer
-    # is empty or loses most of the text, rebuild only the presentation layer
-    # from Docling's own structured markdown export.
-    if not visible or (extracted_text and len(visible) < max(8, len(extracted_text) // 4)):
+    # First fallback: Docling's own structured markdown. This keeps Docling
+    # responsible for reading order/tables/layout whenever possible.
+    if not visible or (extracted_text and _text_quality(visible) < max(8, _text_quality(extracted_text) // 4)):
         markdown = document.export_to_markdown(traverse_pictures=True)
         generated = HTML_HEAD + _markdown_fallback(markdown)
+        visible = _visible_text(generated)
         print("Docling HTML serializer produced insufficient editable text; using Docling markdown fallback", file=sys.stderr)
+
+    # Second fallback: only for PDFs whose legacy font encoding makes Docling
+    # lose actual glyphs. Keep the Docling result unless raw PDF text is
+    # materially richer; this is not a pdf2docx fallback and does not replace
+    # Docling's document understanding for normal PDFs.
+    if raw_text and _text_quality(raw_text) > max(12, _text_quality(visible) * 2):
+        generated = HTML_HEAD + _markdown_fallback(raw_text)
+        print("Docling text recovery used PyMuPDF for legacy PDF glyph encoding", file=sys.stderr)
 
     generated = _decorate_header(generated, source)
     target.write_text(generated, encoding="utf-8")
+    final_visible = _visible_text(generated)
     if not target.is_file() or target.stat().st_size == 0:
         raise RuntimeError("Docling produced no HTML output")
-    if extracted_text and not _visible_text(generated):
+    if not final_visible:
         raise RuntimeError("Docling produced empty editable content")
 
-    print(f"Docling converted {source.name}: {document.num_pages()} pages; editable text={len(extracted_text)} chars")
+    print(f"Docling converted {source.name}: {document.num_pages()} pages; Docling text={len(extracted_text)} chars; final editable text={len(final_visible)} chars")
     return 0
 
 
