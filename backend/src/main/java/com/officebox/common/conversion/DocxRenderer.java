@@ -35,7 +35,6 @@ import org.springframework.stereotype.Component;
 /** Renders the coordinate-aware PDF model as editable DOCX content. */
 @Component
 public class DocxRenderer {
-  private static final double POINTS_PER_INCH = 72.0;
   private static final double MIN_FONT_PT = 5.0;
   private static final double MAX_FONT_PT = 72.0;
 
@@ -70,8 +69,9 @@ public class DocxRenderer {
     if (textBlocks.isEmpty() && blocks.stream().noneMatch(ImageBlock.class::isInstance)
         && blocks.stream().noneMatch(TableBlock.class::isInstance)) return;
 
-    if (detectColumns(textBlocks, page.width()).twoColumns()) {
-      renderTwoColumns(document, blocks, detectColumns(textBlocks, page.width()).split(), page.width());
+    ColumnLayout columns = detectColumns(textBlocks, page.width());
+    if (columns.twoColumns()) {
+      renderTwoColumns(document, blocks, columns.split(), page.width());
     } else {
       renderSingleColumn(document, blocks);
     }
@@ -196,8 +196,6 @@ public class DocxRenderer {
   }
 
   private void renderTableIntoCell(XWPFTableCell parentCell, TableBlock table) {
-    // POI does not expose a simple nested-table helper. Preserve all detected
-    // table cell content as editable paragraphs inside the surrounding column.
     for (List<TextBlock> row : table.rows()) {
       XWPFParagraph paragraph = parentCell.addParagraph();
       paragraph.setSpacingBefore(0);
@@ -261,16 +259,17 @@ public class DocxRenderer {
     if (blocks.size() < 6) return new ColumnLayout(false, pageWidth);
     List<Double> xs = blocks.stream().map(b -> b.bounds().x()).sorted().toList();
     double bestGap = 0;
-    double split = pageWidth;
+    double candidateSplit = pageWidth;
     for (int i = 1; i < xs.size(); i++) {
       double a = xs.get(i - 1);
       double b = xs.get(i);
       double gap = b - a;
       if (a > pageWidth * .12 && b < pageWidth * .88 && gap > bestGap) {
         bestGap = gap;
-        split = (a + b) / 2;
+        candidateSplit = (a + b) / 2;
       }
     }
+    final double split = candidateSplit;
     boolean two = bestGap >= Math.max(28, pageWidth * .08);
     if (two) {
       long left = blocks.stream().filter(block -> block.bounds().x() < split).count();
