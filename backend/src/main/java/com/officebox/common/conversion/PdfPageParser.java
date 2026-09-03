@@ -26,6 +26,7 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.apache.pdfbox.util.Matrix;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Extracts PDF content into a coordinate-aware intermediate representation. */
@@ -35,12 +36,11 @@ public class PdfPageParser {
   private final PdfLayoutAnalyzer layoutAnalyzer;
 
   public PdfPageParser() { this(new PdfLayoutAnalyzer()); }
-  public PdfPageParser(PdfLayoutAnalyzer layoutAnalyzer) { this.layoutAnalyzer = layoutAnalyzer; }
+  @Autowired public PdfPageParser(PdfLayoutAnalyzer layoutAnalyzer) { this.layoutAnalyzer = layoutAnalyzer; }
 
   public PageModel parse(PDDocument document, int pageNumber) throws IOException {
     PDPage page = document.getPage(pageNumber - 1);
-    double width = page.getMediaBox().getWidth();
-    double height = page.getMediaBox().getHeight();
+    double width = page.getMediaBox().getWidth(), height = page.getMediaBox().getHeight();
     PositionStripper stripper = new PositionStripper();
     stripper.setSortByPosition(true); stripper.setStartPage(pageNumber); stripper.setEndPage(pageNumber); stripper.getText(document);
     List<PageBlock> blocks = new ArrayList<>();
@@ -51,10 +51,7 @@ public class PdfPageParser {
         boolean bold = glyph.font.toLowerCase().contains("bold") || glyph.font.toLowerCase().contains("black");
         boolean italic = glyph.font.toLowerCase().contains("italic") || glyph.font.toLowerCase().contains("oblique");
         boolean needsSpace = previous != null && !previous.text.isBlank() && !glyph.text.isBlank() && glyph.x - previous.right() > Math.max(1.2, glyph.size * .22);
-        if (needsSpace && !spans.isEmpty()) {
-          int last = spans.size() - 1; TextSpan old = spans.get(last);
-          spans.set(last, new TextSpan(old.text() + " ", old.bounds(), old.fontName(), old.fontSize(), old.red(), old.green(), old.blue(), old.bold(), old.italic()));
-        }
+        if (needsSpace && !spans.isEmpty()) { int last = spans.size() - 1; TextSpan old = spans.get(last); spans.set(last, new TextSpan(old.text() + " ", old.bounds(), old.fontName(), old.fontSize(), old.red(), old.green(), old.blue(), old.bold(), old.italic())); }
         if (current == null || Math.abs(current.size - glyph.size) > .5 || current.bold != bold || current.italic != italic || !current.font.equals(glyph.font)) {
           current = new Span(glyph.text, glyph.size, glyph.font, bold, italic, glyph.x, glyph.y, glyph.width, glyph.height); spans.add(current.toTextSpan());
         } else {
@@ -76,8 +73,7 @@ public class PdfPageParser {
   }
 
   private static ImageBlock renderPageArtwork(PDDocument document, int pageNumber, double width, double height) throws IOException {
-    BufferedImage image = new PDFRenderer(document).renderImageWithDPI(pageNumber - 1, ARTWORK_DPI, ImageType.RGB);
-    ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image, "png", out);
+    BufferedImage image = new PDFRenderer(document).renderImageWithDPI(pageNumber - 1, ARTWORK_DPI, ImageType.RGB); ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image, "png", out);
     return new ImageBlock(new BoundingBox(0, 0, width, height), "image/png", out.toByteArray());
   }
 
@@ -85,39 +81,27 @@ public class PdfPageParser {
     private final double pageWidth, pageHeight; private final List<ImageBlock> images = new ArrayList<>();
     ImageExtractor(double pageWidth, double pageHeight) { super(); this.pageWidth = pageWidth; this.pageHeight = pageHeight; }
     @Override protected void processOperator(org.apache.pdfbox.contentstream.operator.Operator operator, List<COSBase> operands) throws IOException {
-      if ("Do".equals(operator.getName()) && !operands.isEmpty() && operands.get(0) instanceof COSName name) {
-        PDXObject xObject = getResources().getXObject(name); if (xObject instanceof PDImageXObject image) addImage(image);
-      }
+      if ("Do".equals(operator.getName()) && !operands.isEmpty() && operands.get(0) instanceof COSName name) { PDXObject xObject = getResources().getXObject(name); if (xObject instanceof PDImageXObject image) addImage(image); }
       super.processOperator(operator, operands);
     }
     private void addImage(PDImageXObject image) throws IOException {
-      Matrix matrix = getGraphicsState().getCurrentTransformationMatrix();
-      Point2D.Float p0 = matrix.transformPoint(0, 0), p1 = matrix.transformPoint(1, 0), p2 = matrix.transformPoint(0, 1), p3 = matrix.transformPoint(1, 1);
+      Matrix matrix = getGraphicsState().getCurrentTransformationMatrix(); Point2D.Float p0 = matrix.transformPoint(0, 0), p1 = matrix.transformPoint(1, 0), p2 = matrix.transformPoint(0, 1), p3 = matrix.transformPoint(1, 1);
       double minX = Math.max(0, Math.min(Math.min(p0.x, p1.x), Math.min(p2.x, p3.x))), maxX = Math.min(pageWidth, Math.max(Math.max(p0.x, p1.x), Math.max(p2.x, p3.x)));
       double minPdfY = Math.max(0, Math.min(Math.min(p0.y, p1.y), Math.min(p2.y, p3.y))), maxPdfY = Math.min(pageHeight, Math.max(Math.max(p0.y, p1.y), Math.max(p2.y, p3.y)));
       double w = maxX - minX, h = maxPdfY - minPdfY; if (w < 2 || h < 2) return;
       String suffix = image.getSuffix(), format = "png", mime = "image/png";
-      if ("jpg".equalsIgnoreCase(suffix) || "jpeg".equalsIgnoreCase(suffix)) { format = "jpg"; mime = "image/jpeg"; }
-      else if ("gif".equalsIgnoreCase(suffix)) { format = "gif"; mime = "image/gif"; }
-      else if ("bmp".equalsIgnoreCase(suffix)) { format = "bmp"; mime = "image/bmp"; }
-      ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image.getImage(), format, out);
-      images.add(new ImageBlock(new BoundingBox(minX, pageHeight - maxPdfY, w, h), mime, out.toByteArray()));
+      if ("jpg".equalsIgnoreCase(suffix) || "jpeg".equalsIgnoreCase(suffix)) { format = "jpg"; mime = "image/jpeg"; } else if ("gif".equalsIgnoreCase(suffix)) { format = "gif"; mime = "image/gif"; } else if ("bmp".equalsIgnoreCase(suffix)) { format = "bmp"; mime = "image/bmp"; }
+      ByteArrayOutputStream out = new ByteArrayOutputStream(); ImageIO.write(image.getImage(), format, out); images.add(new ImageBlock(new BoundingBox(minX, pageHeight - maxPdfY, w, h), mime, out.toByteArray()));
     }
     List<ImageBlock> images() { return List.copyOf(images); }
   }
 
   private static final class PositionStripper extends PDFTextStripper {
     private final List<Glyph> glyphs = new ArrayList<>(); PositionStripper() throws IOException { super(); }
-    @Override protected void writeString(String text, List<TextPosition> positions) {
-      for (TextPosition p : positions) { String value = p.getUnicode(); if (value != null && !value.isEmpty()) glyphs.add(new Glyph(value, p.getXDirAdj(), p.getYDirAdj(), p.getWidthDirAdj(), p.getHeightDir(), p.getFontSizeInPt(), p.getFont() == null ? "" : p.getFont().getName())); }
-    }
+    @Override protected void writeString(String text, List<TextPosition> positions) { for (TextPosition p : positions) { String value = p.getUnicode(); if (value != null && !value.isEmpty()) glyphs.add(new Glyph(value, p.getXDirAdj(), p.getYDirAdj(), p.getWidthDirAdj(), p.getHeightDir(), p.getFontSizeInPt(), p.getFont() == null ? "" : p.getFont().getName())); } }
     List<Line> lines() {
       glyphs.sort(Comparator.comparingDouble((Glyph g) -> g.y).thenComparingDouble(g -> g.x)); List<Line> result = new ArrayList<>();
-      for (Glyph glyph : glyphs) {
-        Line target = null;
-        for (int i = result.size() - 1; i >= 0; i--) { Line line = result.get(i); if (Math.abs(line.y - glyph.y) <= Math.max(2.5, glyph.size * .45)) { target = line; break; } if (line.y < glyph.y - 9) break; }
-        if (target == null) { target = new Line(glyph.y); result.add(target); } target.glyphs.add(glyph);
-      }
+      for (Glyph glyph : glyphs) { Line target = null; for (int i = result.size() - 1; i >= 0; i--) { Line line = result.get(i); if (Math.abs(line.y - glyph.y) <= Math.max(2.5, glyph.size * .45)) { target = line; break; } if (line.y < glyph.y - 9) break; } if (target == null) { target = new Line(glyph.y); result.add(target); } target.glyphs.add(glyph); }
       result.sort(Comparator.comparingDouble(l -> l.y)); for (Line line : result) line.glyphs.sort(Comparator.comparingDouble(g -> g.x)); return result;
     }
   }
