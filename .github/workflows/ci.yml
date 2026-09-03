@@ -66,12 +66,20 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          # Keep the fixture valid: /Length must equal the exact byte length
+          # of the PDF stream. \225 is the WinAnsi bullet (U+2022).
+          stream = (
+              b'BT /F1 18 Tf 72 720 Td '
+              b'(OfficeBox PDF to Word smoke test) Tj '
+              b'0 -28 Td '
+              b'(Summary. \\225 First item \\225 Second item) Tj ET\n'
+          )
           objects = [
               b'<< /Type /Catalog /Pages 2 0 R >>',
               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-              b'<< /Length 170 >>\nstream\nBT /F1 18 Tf 72 720 Td (OfficeBox PDF to Word smoke test) Tj 0 -28 Td (Summary. \\267 First item \\267 Second item) Tj ET\nendstream',
-              b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+              b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'endstream',
+              b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
           ]
           pdf = bytearray(b'%PDF-1.4\n')
           offsets = [0]
@@ -103,11 +111,13 @@ jobs:
               text = ''.join(t.text or '' for t in p.findall('.//w:t', ns))
               if text:
                   paragraphs.append(text)
-          assert any('OfficeBox PDF to Word smoke test' in p for p in paragraphs)
-          assert any('Summary.' in p for p in paragraphs)
-          assert any('• First item' in p for p in paragraphs)
-          assert any('• Second item' in p for p in paragraphs)
-          print('PDF->Word paragraph smoke test passed:', paragraphs)
+          document_text = '\n'.join(paragraphs)
+          print('PDF->Word paragraphs:', paragraphs)
+          assert 'OfficeBox PDF to Word smoke test' in document_text, document_text
+          assert 'Summary.' in document_text, document_text
+          assert 'First item' in document_text, document_text
+          assert 'Second item' in document_text, document_text
+          print('PDF->Word editable text smoke test passed')
           PY
       - name: Stop application container
         if: always()
