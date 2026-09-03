@@ -23,6 +23,7 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.apache.xmlbeans.XmlCursor;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
@@ -71,7 +72,8 @@ public class DocxRenderer {
     for (PageBlock block : sorted(blocks)) {
       XWPFParagraph paragraph = document.createParagraph();
       positionParagraph(paragraph, block, previousBottom, 0);
-      writeBlock(paragraph, block);
+      if (block instanceof TableBlock table) writeTableAfter(paragraph, table);
+      else writeBlock(paragraph, block);
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
     }
   }
@@ -83,8 +85,7 @@ public class DocxRenderer {
       if (center < split) left.add(block); else right.add(block);
     }
     XWPFTable table = document.createTable(1, 2);
-    table.setWidth("100%");
-    table.getCTTbl().getTblPr().unsetTblBorders();
+    table.setWidth("100%"); table.getCTTbl().getTblPr().unsetTblBorders();
     CTTblLayoutType layout = table.getCTTbl().getTblPr().isSetTblLayout()
         ? table.getCTTbl().getTblPr().getTblLayout() : table.getCTTbl().getTblPr().addNewTblLayout();
     layout.setType(STTblLayoutType.FIXED);
@@ -98,9 +99,18 @@ public class DocxRenderer {
   private void renderCell(XWPFTableCell cell, List<PageBlock> blocks, double originX) {
     double previousBottom = 0;
     for (PageBlock block : sorted(blocks)) {
-      XWPFParagraph paragraph = cell.addParagraph();
-      positionParagraph(paragraph, block, previousBottom, originX);
-      writeBlock(paragraph, block);
+      if (block instanceof TableBlock nested) {
+        XWPFParagraph anchor = cell.addParagraph();
+        positionParagraph(anchor, block, previousBottom, originX);
+        // Nested tables are rare; render their cells as paragraphs rather than losing content.
+        for (List<TextBlock> row : nested.rows()) for (TextBlock text : row) {
+          XWPFParagraph p = cell.addParagraph(); writeSpans(p, text.spans());
+        }
+      } else {
+        XWPFParagraph paragraph = cell.addParagraph();
+        positionParagraph(paragraph, block, previousBottom, originX);
+        writeBlock(paragraph, block);
+      }
       previousBottom = Math.max(previousBottom, block.bounds().bottom());
     }
   }
@@ -111,37 +121,44 @@ public class DocxRenderer {
       writeSpans(paragraph, text.spans());
     } else if (block instanceof ImageBlock image) {
       writeImage(paragraph, image);
-    } else if (block instanceof TableBlock table) {
-      // A table cannot live inside a paragraph; the caller handles this special case below.
-      writeTableAfter(paragraph, table);
     }
   }
 
   private void writeTableAfter(XWPFParagraph anchor, TableBlock table) {
     XWPFDocument document = anchor.getDocument();
-    XWPFTable wordTable = document.createTable(table.rows().size(), table.rows().stream().mapToInt(List::size).max().orElse(1));
-    wordTable.setWidth("100%");
-    CTTblLayoutType layout = wordTable.getCTTbl().getTblPr().isSetTblLayout()
-        ? wordTable.getCTTbl().getTblPr().getTblLayout() : wordTable.getCTTbl().getTblPr().addNewTblLayout();
-    layout.setType(STTblLayoutType.FIXED);
-    wordTable.getCTTbl().getTblPr().unsetTblBorders();
-    for (int r = 0; r < table.rows().size(); r++) {
-      List<TextBlock> sourceRow = table.rows().get(r);
-      XWPFTableRow targetRow = wordTable.getRow(r);
-      for (int c = 0; c < sourceRow.size(); c++) {
-        XWPFTableCell cell = targetRow.getCell(c);
-        clearCell(cell);
-        XWPFParagraph p = cell.addParagraph();
-        p.setSpacingBefore(0); p.setSpacingAfter(0);
-        writeSpans(p, sourceRow.get(c).spans());
+    XmlCursor cursor = anchor.getCTP().newCursor();
+    try {
+      cursor.toEndToken();
+      XWPFTable wordTable = document.insertNewTbl(cursor);
+      wordTable.setWidth("100%");
+      CTTblLayoutType layout = wordTable.getCTTbl().getTblPr().isSetTblLayout()
+          ? wordTable.getCTTbl().getTblPr().getTblLayout() : wordTable.getCTTbl().getTblPr().addNewTblLayout();
+      layout.setType(STTblLayoutType.FIXED);
+      wordTable.getCTTbl().getTblPr().unsetTblBorders();
+      // insertNewTbl creates a one-row/one-cell table; resize it to the detected grid.
+      int targetRows = table.rows().size();
+      int targetCols = table.rows().stream().mapToInt(List::size).max().orElse(1);
+      while (wordTable.getNumberOfRows() < targetRows) wordTable.addRow();
+      while (wordTable.getRow(0).getTableCells().size() < targetCols) wordTable.getRow(0).addNewTableCell();
+      for (int r = 0; r < targetRows; r++) {
+        XWPFTableRow row = wordTable.getRow(r);
+        while (row.getTableCells().size() < targetCols) row.addNewTableCell();
+        List<TextBlock> sourceRow = table.rows().get(r);
+        for (int c = 0; c < sourceRow.size(); c++) {
+          XWPFTableCell cell = row.getCell(c);
+          clearCell(cell);
+          XWPFParagraph p = cell.addParagraph(); p.setSpacingBefore(0); p.setSpacingAfter(0);
+          writeSpans(p, sourceRow.get(c).spans());
+        }
       }
+    } finally {
+      cursor.dispose();
     }
     anchor.setSpacingAfter(twips(1));
   }
 
   private static void positionParagraph(XWPFParagraph paragraph, PageBlock block, double previousBottom, double originX) {
-    double gap = Math.max(0, block.bounds().y() - previousBottom);
-    paragraph.setSpacingBefore(twips(gap));
+    paragraph.setSpacingBefore(twips(Math.max(0, block.bounds().y() - previousBottom)));
     paragraph.setSpacingAfter(0);
     paragraph.setIndentationLeft(twips(Math.max(0, block.bounds().x() - originX)));
   }
@@ -149,23 +166,17 @@ public class DocxRenderer {
   private static void writeImage(XWPFParagraph paragraph, ImageBlock image) {
     try {
       XWPFRun run = paragraph.createRun();
-      run.addPicture(new ByteArrayInputStream(image.data()), pictureType(image.mimeType()),
-          "pdf-image." + extension(image.mimeType()), Math.max(1, Units.toEMU(image.bounds().width())),
-          Math.max(1, Units.toEMU(image.bounds().height())));
+      run.addPicture(new ByteArrayInputStream(image.data()), pictureType(image.mimeType()), "pdf-image." + extension(image.mimeType()),
+          Math.max(1, Units.toEMU(image.bounds().width())), Math.max(1, Units.toEMU(image.bounds().height())));
     } catch (Exception e) { throw new IllegalStateException("Unable to embed PDF image", e); }
   }
 
   private static void writeSpans(XWPFParagraph paragraph, List<TextSpan> spans) {
     for (TextSpan span : spans) {
-      XWPFRun run = paragraph.createRun();
-      run.setText(span.text());
-      run.setFontSize((float) Math.max(1, span.fontSize()));
-      String font = normalizeFont(span.fontName());
-      if (!font.isBlank()) run.setFontFamily(font);
+      XWPFRun run = paragraph.createRun(); run.setText(span.text()); run.setFontSize((float) Math.max(1, span.fontSize()));
+      String font = normalizeFont(span.fontName()); if (!font.isBlank()) run.setFontFamily(font);
       run.setBold(span.bold()); run.setItalic(span.italic());
-      if (span.red() != 0 || span.green() != 0 || span.blue() != 0) {
-        run.setColor(String.format("%02X%02X%02X", span.red(), span.green(), span.blue()));
-      }
+      if (span.red() != 0 || span.green() != 0 || span.blue() != 0) run.setColor(String.format("%02X%02X%02X", span.red(), span.green(), span.blue()));
     }
   }
 
@@ -190,12 +201,9 @@ public class DocxRenderer {
   private static List<PageBlock> sorted(List<PageBlock> blocks) {
     return blocks.stream().sorted(Comparator.comparingDouble((PageBlock b) -> b.bounds().y()).thenComparingDouble(b -> b.bounds().x())).toList();
   }
-
   private static boolean isFullPageImage(ImageBlock image, PageModel page) {
-    return image.bounds().x() <= .5 && image.bounds().y() <= .5
-        && image.bounds().width() >= page.width() * .95 && image.bounds().height() >= page.height() * .95;
+    return image.bounds().x() <= .5 && image.bounds().y() <= .5 && image.bounds().width() >= page.width() * .95 && image.bounds().height() >= page.height() * .95;
   }
-
   private static void clearCell(XWPFTableCell cell) { while (!cell.getParagraphs().isEmpty()) cell.removeParagraph(0); }
   private static void setCellWidth(XWPFTableCell cell, double points) { cell.setWidth(String.format("%.0fpt", Math.max(1, points))); }
   private static int twips(double points) { return (int) Math.round(points * 20); }
